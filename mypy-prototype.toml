@@ -1,0 +1,12 @@
+# Type-checking configuration for the tier-two prototype packages (ADR 0010).
+#
+#   mypy --config-file mypy-prototype.toml generation/neural/nn datasets/synthetic \
+#        training visualization experiments
+#
+# Python 3.12 is used only because NumPy's shipped stubs are written in 3.12 type
+# syntax. The code runs on 3.11; the Step 4 suite verifies that by executing there.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true

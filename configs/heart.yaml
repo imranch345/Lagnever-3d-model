@@ -1,0 +1,99 @@
+# Lagnav 3D - heart domain configuration
+#
+# Runtime behaviour that must not be hard-coded in Python lives here.
+# Anatomical truth lives in ontology/heart/*.json, never in this file.
+
+config_version: "0.1.0"
+
+domain:
+  id: "heart"
+  display_name: "Human heart"
+  ontology_dir: "ontology/heart"      # relative to the repository root
+  ontology_version: "0.1.0"           # must match the ontology files, checked at load time
+
+scene_defaults:
+  scene_name: "Human heart"
+  active_lod: 1                       # LOD applied by "generate a human heart"
+  educational_level: "school"
+  default_opacity: 1.0
+
+# Anatomical level of detail.
+# Provisional. The architectural rule is that the AWR always holds every entity;
+# LOD only decides what is visible by default.
+lod_levels:
+  0:
+    name: "organ"
+    description: "Whole heart as a single shell."
+  1:
+    name: "major_structures"
+    description: "Major chambers and great vessels."
+  2:
+    name: "chambers_and_valves"
+    description: "Chambers, valves, septa and other major structures."
+  3:
+    name: "internal_detail"
+    description: "Wall layers and deeper internal anatomy."
+  4:
+    name: "medical"
+    description: "Medical-level anatomy including conduction system and coronary circulation."
+
+# Educational level -> LOD. "Switch to medical level" resolves through this map.
+educational_levels:
+  primary:
+    lod: 0
+    description: "Primary school: the organ as one object."
+  school:
+    lod: 1
+    description: "School: chambers and great vessels."
+  high_school:
+    lod: 2
+    description: "High school: adds valves and septa."
+  university:
+    lod: 3
+    description: "University: adds wall layers and internal detail."
+  medical:
+    lod: 4
+    description: "Medical: full v0.1 detail."
+
+# Named opacity values used by the command layer, so that "transparent" is a
+# configuration decision rather than a magic number in code.
+opacity_presets:
+  opaque: 1.0
+  semi_transparent: 0.6
+  transparent: 0.3
+  ghost: 0.15
+
+resolver:
+  # Deterministic fuzzy matching (difflib ratio). Raise to make the resolver stricter.
+  fuzzy_threshold: 0.82
+  max_suggestions: 5
+  # Ambiguous surface forms are never silently guessed; the resolver raises with candidates.
+  allow_ambiguous_autopick: false
+
+geometry:
+  # Symbolic geometry component ids are allocated deterministically. No mesh is produced.
+  component_id_prefix: "geometry_part_"
+  component_id_digits: 4
+
+# Provisional cardiac-cycle timing for the semantic animation layer.
+# These fractions describe the phase structure of one cycle, not a validated
+# haemodynamic model. Fractions must sum to 1.0 (checked at load time).
+cardiac_cycle:
+  clip_id: "blood_flow"
+  cycle_duration_seconds: 0.85      # about 70 beats per minute
+  phases:
+    - name: "atrial_systole"
+      fraction: 0.12
+      description: "Atria contract; atrioventricular valves open; ventricles complete filling."
+    - name: "isovolumetric_contraction"
+      fraction: 0.06
+      description: "Ventricles contract with all valves closed; pressure rises."
+    - name: "ventricular_ejection"
+      fraction: 0.30
+      description: "Semilunar valves open; blood is ejected into the great arteries."
+    - name: "isovolumetric_relaxation"
+      fraction: 0.07
+      description: "Ventricles relax with all valves closed; pressure falls."
+    - name: "ventricular_filling"
+      fraction: 0.45
+      description: "Atrioventricular valves open; ventricles fill passively."

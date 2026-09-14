@@ -1,0 +1,392 @@
+{
+  "schema_version": "lagnav-dataset-1",
+  "sample_id": "heart_sample_0001",
+  "synthetic": true,
+  "text": {
+    "prompt": "Generate a human heart and show the four chambers.",
+    "description": "Whole heart with the four chambers highlighted.",
+    "educational_level": "school",
+    "language": "en"
+  },
+  "anatomy": {
+    "ontology_id": "lagnav.heart",
+    "ontology_version": "0.1.0",
+    "root_entity_id": "heart"
+  },
+  "parts": [
+    {
+      "entity_id": "heart",
+      "present": true,
+      "geometry_component_id": "geometry_part_0000",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.chambers",
+      "present": true,
+      "geometry_component_id": "geometry_part_0001",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.valves",
+      "present": true,
+      "geometry_component_id": "geometry_part_0002",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.great_vessels",
+      "present": true,
+      "geometry_component_id": "geometry_part_0003",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.septa",
+      "present": true,
+      "geometry_component_id": "geometry_part_0004",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.wall_layers",
+      "present": true,
+      "geometry_component_id": "geometry_part_0005",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.internal_structures",
+      "present": true,
+      "geometry_component_id": "geometry_part_0006",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.right_atrium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0007",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.right_ventricle",
+      "present": true,
+      "geometry_component_id": "geometry_part_0008",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.left_atrium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0009",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.left_ventricle",
+      "present": true,
+      "geometry_component_id": "geometry_part_0010",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.tricuspid_valve",
+      "present": true,
+      "geometry_component_id": "geometry_part_0011",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.pulmonary_valve",
+      "present": true,
+      "geometry_component_id": "geometry_part_0012",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.mitral_valve",
+      "present": true,
+      "geometry_component_id": "geometry_part_0013",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.aortic_valve",
+      "present": true,
+      "geometry_component_id": "geometry_part_0014",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.superior_vena_cava",
+      "present": true,
+      "geometry_component_id": "geometry_part_0015",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.inferior_vena_cava",
+      "present": true,
+      "geometry_component_id": "geometry_part_0016",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.pulmonary_trunk",
+      "present": true,
+      "geometry_component_id": "geometry_part_0017",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.pulmonary_arteries",
+      "present": true,
+      "geometry_component_id": "geometry_part_0018",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.pulmonary_veins",
+      "present": true,
+      "geometry_component_id": "geometry_part_0019",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.aorta",
+      "present": true,
+      "geometry_component_id": "geometry_part_0020",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.interatrial_septum",
+      "present": true,
+      "geometry_component_id": "geometry_part_0021",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.interventricular_septum",
+      "present": true,
+      "geometry_component_id": "geometry_part_0022",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.endocardium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0023",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.myocardium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0024",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.epicardium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0025",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.pericardium",
+      "present": true,
+      "geometry_component_id": "geometry_part_0026",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.papillary_muscles",
+      "present": true,
+      "geometry_component_id": "geometry_part_0027",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.chordae_tendineae",
+      "present": true,
+      "geometry_component_id": "geometry_part_0028",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.trabeculae_carneae",
+      "present": true,
+      "geometry_component_id": "geometry_part_0029",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.moderator_band",
+      "present": true,
+      "geometry_component_id": "geometry_part_0030",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.fossa_ovalis",
+      "present": true,
+      "geometry_component_id": "geometry_part_0031",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.coronary_circulation",
+      "present": true,
+      "geometry_component_id": "geometry_part_0032",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.left_coronary_artery",
+      "present": true,
+      "geometry_component_id": "geometry_part_0033",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.right_coronary_artery",
+      "present": true,
+      "geometry_component_id": "geometry_part_0034",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.coronary_sinus",
+      "present": true,
+      "geometry_component_id": "geometry_part_0035",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.cardiac_conduction_system",
+      "present": true,
+      "geometry_component_id": "geometry_part_0036",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.sinoatrial_node",
+      "present": true,
+      "geometry_component_id": "geometry_part_0037",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.atrioventricular_node",
+      "present": true,
+      "geometry_component_id": "geometry_part_0038",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.bundle_of_his",
+      "present": true,
+      "geometry_component_id": "geometry_part_0039",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.bundle_branches",
+      "present": true,
+      "geometry_component_id": "geometry_part_0040",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    },
+    {
+      "entity_id": "heart.purkinje_fibers",
+      "present": true,
+      "geometry_component_id": "geometry_part_0041",
+      "label": null,
+      "annotator": "synthetic",
+      "confidence": null
+    }
+  ],
+  "images": [],
+  "multi_view": [],
+  "models_3d": [],
+  "functional": {
+    "flow_paths": [
+      [
+        "heart.superior_vena_cava",
+        "heart.right_atrium",
+        "heart.tricuspid_valve",
+        "heart.right_ventricle"
+      ]
+    ],
+    "cycle_phases": [
+      "atrial_systole",
+      "ventricular_ejection"
+    ],
+    "notes": "Derived from the functional graph, not from measurement."
+  },
+  "validation": {
+    "status": "unvalidated",
+    "reviewer": null,
+    "reviewed_on": null,
+    "notes": "Synthetic example; no clinical review."
+  },
+  "provenance": {
+    "source_name": "Lagnav 3D R&D (synthetic)",
+    "licence": "internal-rnd",
+    "source_url": null,
+    "licence_url": null,
+    "attribution": null,
+    "redistributable": false,
+    "acquired_on": null,
+    "notes": "Every asset must carry an explicit licence and source before it enters the dataset. Samples without provenance are rejected at load time. Nothing is scraped, and no third-party anatomical atlas, scan archive or model library is used until its terms have been reviewed and recorded here."
+  },
+  "metadata": {
+    "purpose": "schema example",
+    "assets": "none"
+  }
+}

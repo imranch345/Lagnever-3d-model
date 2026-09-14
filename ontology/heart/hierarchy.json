@@ -1,0 +1,97 @@
+{
+  "ontology_id": "lagnav.heart",
+  "title": "Heart Ontology v0.1 - organisational hierarchy",
+  "version": "0.1.0",
+  "schema_version": "awr-ontology-1",
+  "status": "DRAFT_UNVALIDATED",
+  "description": "Single-parent organisational tree used to build the AWR scene tree. This tree is a PRESENTATION hierarchy (how a learner navigates the organ), not a claim about anatomical partonomy. True anatomical containment that differs from this tree is declared separately as 'part_of' edges in relationships.json (for example: the fossa ovalis is filed under internal structures here, but is anatomically part_of the interatrial septum).",
+  "root": "heart",
+  "nodes": [
+    {
+      "parent": "heart",
+      "children": [
+        "heart.chambers",
+        "heart.valves",
+        "heart.great_vessels",
+        "heart.septa",
+        "heart.wall_layers",
+        "heart.internal_structures",
+        "heart.coronary_circulation",
+        "heart.cardiac_conduction_system"
+      ]
+    },
+    {
+      "parent": "heart.chambers",
+      "children": [
+        "heart.right_atrium",
+        "heart.right_ventricle",
+        "heart.left_atrium",
+        "heart.left_ventricle"
+      ]
+    },
+    {
+      "parent": "heart.valves",
+      "children": [
+        "heart.tricuspid_valve",
+        "heart.pulmonary_valve",
+        "heart.mitral_valve",
+        "heart.aortic_valve"
+      ]
+    },
+    {
+      "parent": "heart.great_vessels",
+      "children": [
+        "heart.superior_vena_cava",
+        "heart.inferior_vena_cava",
+        "heart.pulmonary_trunk",
+        "heart.pulmonary_arteries",
+        "heart.pulmonary_veins",
+        "heart.aorta"
+      ]
+    },
+    {
+      "parent": "heart.septa",
+      "children": [
+        "heart.interatrial_septum",
+        "heart.interventricular_septum"
+      ]
+    },
+    {
+      "parent": "heart.wall_layers",
+      "children": [
+        "heart.endocardium",
+        "heart.myocardium",
+        "heart.epicardium",
+        "heart.pericardium"
+      ]
+    },
+    {
+      "parent": "heart.internal_structures",
+      "children": [
+        "heart.papillary_muscles",
+        "heart.chordae_tendineae",
+        "heart.trabeculae_carneae",
+        "heart.moderator_band",
+        "heart.fossa_ovalis"
+      ]
+    },
+    {
+      "parent": "heart.coronary_circulation",
+      "children": [
+        "heart.left_coronary_artery",
+        "heart.right_coronary_artery",
+        "heart.coronary_sinus"
+      ]
+    },
+    {
+      "parent": "heart.cardiac_conduction_system",
+      "children": [
+        "heart.sinoatrial_node",
+        "heart.atrioventricular_node",
+        "heart.bundle_of_his",
+        "heart.bundle_branches",
+        "heart.purkinje_fibers"
+      ]
+    }
+  ]
+}

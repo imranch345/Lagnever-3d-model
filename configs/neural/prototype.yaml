@@ -1,0 +1,69 @@
+# Lagnav neural configuration - PROTOTYPE scale.
+#
+# STATUS: PROPOSED. Nothing here has been trained. Values are starting points for
+# the first heart experiment, chosen so a run finishes in hours on one GPU.
+#
+# Architecture widths are NOT duplicated here. They live in
+# generation/neural/scales.py and are referenced by name, so the two cannot drift.
+
+config_version: "0.1.0"
+status: "proposed"
+scale: "prototype"
+
+experiment:
+  id: "heart-001-structured-vs-appearance"
+  hypothesis: "H1"
+  arm: "lagnav_structured"          # the ablation's other arm is configs/neural/baseline.yaml
+
+curriculum:
+  # Stages to run, in order. S0 and S1 need no external data at all.
+  stages: ["S0", "S1", "S2", "S3", "S4"]
+  stop_after: "S4"
+
+losses:
+  # Must reference objectives declared in generation/neural/losses.py.
+  # Objectives held out for evaluation are rejected at load time on purpose:
+  # training on the metric would make the hypothesis untestable.
+  language_anatomy_alignment: 1.0
+  entity_identity: 1.0
+  geometry_reconstruction: 1.0
+  semantic_part_correspondence: 1.0
+  entity_frame: 0.5
+  lod_consistency: 0.5
+  edit_consistency: 1.0
+
+optimization:
+  optimizer: "adamw"
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 500
+  max_steps: 20000
+  batch_scenes: 8
+  query_points_per_scene: 4096
+  precision: "bf16"
+  gradient_clip: 1.0
+  seed: 0                            # determinism is a project requirement
+
+data:
+  tier: "synthetic"                  # tier-0 controlled testbed; see experiments/heart/
+  scenes: 5000
+  split: { train: 0.8, validation: 0.1, test: 0.1 }
+  hold_out: "procedural families, so no family appears in two splits"
+  licensed_assets: false
+
+checkpointing:
+  every_steps: 2000
+  keep_last: 3
+
+evaluation:
+  # Measured, never trained, in this experiment.
+  metrics:
+    - "part_control_success"
+    - "edit_locality"
+    - "identity_persistence"
+    - "structural_relationship_accuracy"
+    - "spatial_relationship_accuracy"
+    - "functional_relationship_accuracy"
+    - "chamfer_distance"
+    - "part_segmentation_iou"
+    - "watertight_fraction"

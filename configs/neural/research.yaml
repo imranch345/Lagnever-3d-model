@@ -1,0 +1,63 @@
+# Lagnav neural configuration - RESEARCH scale.
+#
+# STATUS: PROPOSED and not scheduled. Recorded so the prototype's choices can be
+# read as the first point on a ladder rather than as the only design.
+
+config_version: "0.1.0"
+status: "proposed"
+scale: "research"
+
+experiment:
+  id: "heart-research-multimodal"
+  hypothesis: "H1"
+  arm: "lagnav_structured"
+
+curriculum:
+  stages: ["S0", "S1", "S2", "S3", "S4", "S5"]
+  stop_after: "S5"
+
+losses:
+  language_anatomy_alignment: 1.0
+  entity_identity: 1.0
+  geometry_reconstruction: 1.0
+  semantic_part_correspondence: 1.0
+  entity_frame: 0.5
+  lod_consistency: 0.5
+  edit_consistency: 1.0
+
+optimization:
+  optimizer: "adamw"
+  learning_rate: 1.5e-4
+  weight_decay: 0.05
+  warmup_steps: 2000
+  max_steps: 200000
+  batch_scenes: 32
+  query_points_per_scene: 16384
+  precision: "bf16"
+  gradient_clip: 1.0
+  seed: 0
+
+data:
+  tier: "licensed_real"              # requires a completed licence review first
+  scenes: 100000
+  split: { train: 0.8, validation: 0.1, test: 0.1 }
+  hold_out: "subjects and sources, not just scenes"
+  licensed_assets: true
+
+checkpointing:
+  every_steps: 5000
+  keep_last: 5
+
+evaluation:
+  metrics:
+    - "part_control_success"
+    - "edit_locality"
+    - "identity_persistence"
+    - "structural_relationship_accuracy"
+    - "spatial_relationship_accuracy"
+    - "functional_relationship_accuracy"
+    - "chamfer_distance"
+    - "part_segmentation_iou"
+    - "watertight_fraction"
+    - "multi_view_consistency"
+    - "cross_modal_retrieval"

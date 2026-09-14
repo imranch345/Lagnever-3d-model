@@ -1,0 +1,67 @@
+# Lagnav 3D - neural model configuration
+#
+# STATUS: PLACEHOLDER. Every value below is intentionally null.
+#
+# Nothing about the Lagnav neural architecture has been decided yet. This file
+# exists so that Step 5 (Lagnav Neural Architecture + Tensor/Latent
+# Representation Design) has a versioned home for its decisions, and so that no
+# architecture is smuggled into the codebase by accident. Code that reads this
+# file must treat every field as unspecified and must not invent defaults.
+
+config_version: "0.1.0"
+status: "placeholder"
+decided_in_step: null          # will become "step-5" once the design exists
+
+language_encoder:
+  architecture: null           # TODO(step-5)
+  hidden_dim: null
+  max_tokens: null
+  pretrained_init: null
+  frozen: null
+
+anatomical_reasoner:
+  architecture: null           # TODO(step-5): graph reasoning over the AWR
+  graph_message_passing: null
+  num_layers: null
+  entity_embedding_dim: null
+  relation_embedding_dim: null
+
+latent_3d:
+  representation: null         # TODO(step-5): the 3D latent representation is an open research question
+  latent_dim: null
+  tokens_per_entity: null
+  part_disentanglement: null
+
+geometry_decoder:
+  strategy: null               # TODO(step-5): decoding strategy is an open research question
+  output_representation: null
+  per_part_decoding: null      # must preserve entity <-> geometry correspondence
+  resolution: null
+
+material_decoder:
+  architecture: null           # TODO(step-5)
+  parameterisation: null
+
+animation_decoder:
+  architecture: null           # TODO(step-5)
+  temporal_representation: null
+
+training:
+  objectives: null             # TODO(step-5)
+  losses: null
+  optimizer: null
+  lr: null
+  batch_size: null
+  precision: null
+  seed: 0                      # determinism is a project requirement, so the seed is fixed now
+
+multimodal_fusion:
+  strategy: null               # TODO(step-5)
+  attention: null
+
+open_questions:
+  - "Which 3D latent representation preserves per-entity part identity end to end?"
+  - "Does the anatomical reasoner operate on discrete AWR graphs, learned embeddings, or both?"
+  - "How are geometry, material and animation decoders conditioned on a single entity vs the whole scene?"
+  - "What supervision exists for anatomical correctness beyond geometric reconstruction loss?"
+  - "How is an edit expressed to the model so that only one component is regenerated?"

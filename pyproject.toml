@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lagnav-3d"
+version = "0.1.0"
+description = "Lagnav 3D - R&D prototype of a language-controlled 3D anatomical intelligence system: Anatomical World Representation plus a proposed neural architecture."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary - internal R&D" }
+authors = [{ name = "Lagnav 3D R&D" }]
+keywords = ["anatomy", "3d", "knowledge-graph", "research-prototype"]
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3.11",
+  "Intended Audience :: Science/Research",
+]
+
+# Deliberately minimal. The AWR core (awr/, reasoning/, editing/, geometry/,
+# generation/, animation/, evaluation/) imports only the Python standard library.
+# PyYAML is used exclusively by awr/config.py to read configs/*.yaml.
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10", "types-PyYAML>=6.0"]
+# Step 6 prototype: the only heavy dependencies, confined to the tier-2 packages
+# listed in docs/adr/0010-dependency-tiers.md. The AWR core never imports them.
+prototype = ["torch>=2.4,<3", "numpy>=1.26"]
+
+[project.scripts]
+lagnav-heart-demo = "experiments.heart_session_demo:main"
+lagnav-generate-corpus = "datasets.synthetic.cli:main"
+lagnav-train = "training.cli:main"
+lagnav-experiment = "experiments.heart.run_experiment:main"
+
+[tool.setuptools]
+packages = [
+  "awr",
+  "reasoning",
+  "geometry",
+  "generation",
+  "generation.neural",
+  "generation.neural.nn",
+  "editing",
+  "animation",
+  "evaluation",
+  "datasets",
+  "datasets.synthetic",
+  "training",
+  "visualization",
+  "experiments",
+  "experiments.heart",
+]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["error"]
+markers = [
+  "slow: end-to-end runs that train a model; deselect with -m 'not slow'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N", "D"]
+ignore = [
+  "D203",  # incompatible with D211 (blank line before class docstring)
+  "D213",  # incompatible with D212 (multi-line summary position)
+  "D105",  # dunder methods; the class docstring covers them
+  "D107",  # __init__; the class docstring covers it
+  "D401",  # imperative mood; property docstrings read as descriptions by design
+]
+
+# Two type-checking passes, matching the two dependency tiers of ADR 0010.
+#
+#   mypy awr reasoning editing geometry generation animation evaluation datasets
+#   mypy --config-file mypy-prototype.toml generation/neural/nn datasets/synthetic \
+#        training visualization experiments
+#
+# Tier one is checked at 3.11, the project's minimum runtime. Tier two is checked at
+# 3.12 because NumPy's shipped stubs use 3.12 type syntax; the code itself still runs
+# on 3.11, which the Step 4 suite verifies by executing there.
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+# Tier-two packages are skipped here and checked by the second command, which uses
+# mypy-prototype.toml. They are nested inside tier-one packages, so recursion has to be
+# stopped explicitly; mypy's exclude filters recursion but not paths passed by name,
+# which is exactly the behaviour these two commands rely on.
+exclude = [
+  "^generation/neural/nn/",
+  "^datasets/synthetic/",
+  "^training/",
+  "^visualization/",
+  "^experiments/",
+]

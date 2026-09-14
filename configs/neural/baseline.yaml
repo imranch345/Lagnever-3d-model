@@ -1,0 +1,71 @@
+# Appearance-driven BASELINE configuration - the other arm of the first ablation.
+#
+# STATUS: PROPOSED. This is deliberately not Lagnav: no entity axis, no graphs, no
+# per-entity geometry. Part identity is recovered after the fact by a segmentation
+# head, which is how appearance-driven systems handle it.
+#
+# It is trained on the same data, for the same steps, at a matched parameter count,
+# because an unmatched comparison would prove nothing.
+
+config_version: "0.1.0"
+status: "proposed"
+scale: "prototype"
+
+experiment:
+  id: "heart-001-structured-vs-appearance"
+  hypothesis: "H1"
+  arm: "appearance_baseline"
+
+architecture:
+  # Everything the hypothesis claims matters is switched off here.
+  entity_axis: false
+  graph_encoder: false
+  per_entity_geometry: false
+  shared_latent_tokens: 256          # matched capacity, one undifferentiated set
+  part_head: "post_hoc_segmentation"
+  parameter_match_tolerance: 0.05    # within 5% of the Lagnav arm
+
+curriculum:
+  stages: ["S2", "S3", "S4"]
+  stop_after: "S4"
+  # Skipping a stage is allowed but must be declared with a reason, so the
+  # difference between the two arms of the ablation is explicit and auditable.
+  skips:
+    S0: "No ontology pretraining: the baseline has no entity axis or graphs to pretrain."
+    S1: "No AWR program path: the baseline maps text straight to geometry, by design."
+
+losses:
+  geometry_reconstruction: 1.0
+  semantic_part_correspondence: 1.0
+  edit_consistency: 1.0
+
+optimization:
+  optimizer: "adamw"
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 500
+  max_steps: 20000
+  batch_scenes: 8
+  query_points_per_scene: 4096
+  precision: "bf16"
+  gradient_clip: 1.0
+  seed: 0
+
+data:
+  tier: "synthetic"
+  scenes: 5000
+  split: { train: 0.8, validation: 0.1, test: 0.1 }
+  hold_out: "procedural families, so no family appears in two splits"
+  licensed_assets: false
+
+evaluation:
+  metrics:
+    - "part_control_success"
+    - "edit_locality"
+    - "identity_persistence"
+    - "structural_relationship_accuracy"
+    - "spatial_relationship_accuracy"
+    - "functional_relationship_accuracy"
+    - "chamfer_distance"
+    - "part_segmentation_iou"
+    - "watertight_fraction"
