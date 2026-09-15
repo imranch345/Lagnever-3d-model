@@ -64,6 +64,7 @@ class WholeOrganBatchBuilder:
         self.ontology = ontology
         self.config = config
         self.sampling = sampling or WholeOrganSampling()
+        self._structure_cache: tuple[MeasuredEdge, ...] | None = None
         self.extractor = AWRFeatureExtractor(ontology)
         self.slot_of = {entity_id: index for index, entity_id in enumerate(ontology.ids())}
         self.max_edges = max_edges
@@ -118,9 +119,7 @@ class WholeOrganBatchBuilder:
         return out
 
     # ------------------------------------------------------------------
-    def _edge_tensors(
-        self, edge_sets: Sequence[Sequence[MeasuredEdge]]
-    ) -> dict[str, torch.Tensor]:
+    def _edge_tensors(self, edge_sets: Sequence[Sequence[MeasuredEdge]]) -> dict[str, torch.Tensor]:
         batch = len(edge_sets)
         entities = int(self._entity_features["entity_ids"].shape[0])
         source = torch.full((batch, self.max_edges), -1, dtype=torch.int64)
@@ -155,6 +154,20 @@ class WholeOrganBatchBuilder:
             "graph_adjacency": adjacency,
         }
 
+    def _structure_edges(self, scene: WholeOrganScene) -> list[MeasuredEdge]:
+        """The ontology's structural edges between entities this scene contains."""
+        if self._structure_cache is None:
+            self._structure_cache = tuple(
+                MeasuredEdge(subject=edge.subject, relation=edge.relation, object=edge.object)
+                for edge in self.ontology.graph(GraphKind.STRUCTURE).edges
+            )
+        present = set(scene.entity_ids)
+        return [
+            edge
+            for edge in self._structure_cache
+            if edge.subject in present and edge.object in present
+        ]
+
     def _state(self, sampled: Sequence[SampledWholeOrgan]) -> torch.Tensor:
         """Explicit presentation state. Visibility only; nothing that leaks the variant."""
         batch = len(sampled)
@@ -182,6 +195,7 @@ class WholeOrganBatchBuilder:
             edge_override: Replacement relationship graphs, one per scene. This is how
                 the counterfactual experiments swap relations while holding entities,
                 presence and text features fixed.
+
         """
         if not scenes:
             raise ValueError("A batch needs at least one scene.")
@@ -196,7 +210,18 @@ class WholeOrganBatchBuilder:
         batch_size = len(scenes)
         entities = int(self._entity_features["entity_ids"].shape[0])
 
-        edge_sets = list(edge_override) if edge_override is not None else [s.edges for s in scenes]
+        measured = list(edge_override) if edge_override is not None else [s.edges for s in scenes]
+        # The structural graph is ontology knowledge, not a scene measurement: which
+        # structures connect to and are continuous with which does not change when the
+        # organ is mirrored. Without it the structure graph is empty and the
+        # structure-only ablation degenerates into a no-graph arm that still pays for a
+        # graph encoder. Because it is the same for every scene it can only act as a
+        # prior, never as a channel that distinguishes one scene from another, and the
+        # ablation results must be read in that light.
+        edge_sets = [
+            [*self._structure_edges(scene), *edges]
+            for scene, edges in zip(scenes, measured, strict=True)
+        ]
         edges = self._edge_tensors(edge_sets)
 
         def expand(name: str) -> torch.Tensor:
@@ -227,7 +252,7 @@ class WholeOrganBatchBuilder:
 
         text_features = torch.zeros((batch_size, entities + 1), dtype=torch.float32)
         for index, item in enumerate(sampled):
-            text_features[index, : entities] = torch.tensor(item.visible, dtype=torch.float32)
+            text_features[index, :entities] = torch.tensor(item.visible, dtype=torch.float32)
             text_features[index, entities] = 1.0
 
         prototype = PrototypeBatch(
@@ -240,7 +265,7 @@ class WholeOrganBatchBuilder:
                 np.stack([item.scene_occupancy for item in sampled]), dtype=torch.float32
             ),
             part_owner=torch.tensor(
-                np.stack([item.ownership for item in sampled]), dtype=torch.int64
+                np.stack([item.part_owner for item in sampled]), dtype=torch.int64
             ),
             entity_points=torch.tensor(
                 np.stack([item.entity_points for item in sampled]), dtype=torch.float32
@@ -262,7 +287,7 @@ class WholeOrganBatchBuilder:
             for level_key in (1, 2, 3)
         }
         variant_index = torch.tensor(
-            [scene.variant.index for scene in scenes], dtype=torch.int64
+            [scene.variant.position for scene in scenes], dtype=torch.int64
         )
         return WholeOrganBatch(
             batch=prototype,

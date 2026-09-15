@@ -12,9 +12,10 @@ Two things here that Step 6 did not have:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -39,8 +40,8 @@ IntArray = npt.NDArray[np.int64]
 class EditOperation(StrEnum):
     """Controlled geometric edits the generator can apply."""
 
-    THICKEN_WALL = "thicken_wall"
-    THIN_WALL = "thin_wall"
+    THICKEN_LINING = "thicken_lining"
+    THIN_LINING = "thin_lining"
     ENLARGE_VENTRICLE = "enlarge_ventricle"
     SHRINK_VENTRICLE = "shrink_ventricle"
     ENLARGE_ATRIUM = "enlarge_atrium"
@@ -49,8 +50,14 @@ class EditOperation(StrEnum):
 
 
 EDIT_SPECIFICATIONS: Mapping[EditOperation, tuple[str, float, str]] = {
-    EditOperation.THICKEN_WALL: ("wall_fraction", 1.45, "heart.myocardium"),
-    EditOperation.THIN_WALL: ("wall_fraction", 0.68, "heart.myocardium"),
+    # ``wall_fraction`` scales the endocardial and epicardial lining thicknesses. The
+    # myocardium is whatever tissue those linings do not claim, so it changes as a
+    # *consequence* and is not what the parameter commands. These two operations were
+    # originally declared against the myocardium, which made the declared target the
+    # third-most-changed entity rather than the edited one; the measurement above
+    # settled it.
+    EditOperation.THICKEN_LINING: ("wall_fraction", 1.45, "heart.endocardium"),
+    EditOperation.THIN_LINING: ("wall_fraction", 0.68, "heart.endocardium"),
     EditOperation.ENLARGE_VENTRICLE: ("entity", 1.28, "heart.left_ventricle"),
     EditOperation.SHRINK_VENTRICLE: ("entity", 0.76, "heart.left_ventricle"),
     EditOperation.ENLARGE_ATRIUM: ("entity", 1.32, "heart.left_atrium"),
@@ -82,6 +89,10 @@ class SampledWholeOrgan:
     scene_id: str
     scene_points: FloatArray
     ownership: IntArray
+    #: Ownership restricted to the entities the active level exposes. A point owned by a
+    #: finer structure reads as background, which is what ``scene_occupancy`` already
+    #: says about it at that level.
+    part_owner: IntArray
     scene_occupancy: BoolArray
     lod_occupancy: Mapping[int, BoolArray]
     entity_points: FloatArray
@@ -122,10 +133,10 @@ def sample_scene(
 
     visible_names = set(scene.visible_entity_ids())
     lod_occupancy: dict[int, BoolArray] = {}
+    allowed_by_level: dict[int, set[int]] = {}
     for level in (1, 2, 3):
-        allowed = {
-            slot_of[name] for name in LOD_ENTITIES[level] if name in scene.centroids
-        }
+        allowed = {slot_of[name] for name in LOD_ENTITIES[level] if name in scene.centroids}
+        allowed_by_level[level] = allowed
         lod_occupancy[level] = np.isin(codebook_labels, list(allowed))
 
     total = settings.entity_slots
@@ -147,10 +158,21 @@ def sample_scene(
         entity_points[slot] = sampled
         entity_occupancy[slot] = owned
 
+    # The part-correspondence target must name only entities this level exposes.
+    # Otherwise a point whose true owner is hidden at this level is scored against a
+    # class the composition has masked to -1e9, which costs about 1e9 per such point and
+    # swamps every other objective. At level 1 roughly 39% of points were in that state.
+    active = min(max(scene.active_lod, 1), 3)
+    exposed = allowed_by_level[active]
+    part_owner = np.where(np.isin(codebook_labels, list(exposed)), codebook_labels, -1).astype(
+        np.int64
+    )
+
     return SampledWholeOrgan(
         scene_id=scene.scene_id,
         scene_points=points,
         ownership=codebook_labels,
+        part_owner=part_owner,
         scene_occupancy=lod_occupancy[min(max(scene.active_lod, 1), 3)],
         lod_occupancy=lod_occupancy,
         entity_points=entity_points,
@@ -184,7 +206,11 @@ def edit_pair(
         )
     else:
         after_parameters = replace(
-            before_parameters, **{parameter: float(getattr(before_parameters, parameter)) * scale}
+            before_parameters,
+            **cast(
+                dict[str, Any],
+                {parameter: float(getattr(before_parameters, parameter)) * scale},
+            ),
         )
     before = WholeOrganField(before_parameters)
     after = WholeOrganField(after_parameters)

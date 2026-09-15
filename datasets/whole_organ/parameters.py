@@ -23,6 +23,8 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from datasets.whole_organ.arrangement import Arrangement, sample_arrangement
+
 __all__ = [
     "DATA_LABEL",
     "Variant",
@@ -53,8 +55,13 @@ class Variant(StrEnum):
     """Rotated about the vertical axis, which changes anterior and posterior relations."""
 
     @property
-    def index(self) -> int:
-        """Stable integer index, used only for reporting."""
+    def position(self) -> int:
+        """Stable integer index, used only for reporting.
+
+        Named ``position`` rather than ``index`` because ``StrEnum`` inherits ``str``,
+        whose ``index`` takes a substring and returns where it occurs. Shadowing it with
+        a no-argument property of the same name is a silent trap.
+        """
         return list(Variant).index(self)
 
 
@@ -78,7 +85,14 @@ class OrganParameters:
     """
 
     family_id: int
-    variant: Variant
+    arrangement: Arrangement
+    """Where this organ sits in the continuous arrangement space (Step 8).
+
+    This is the source of truth for how the organ is arranged. ``variant`` below is a
+    coarse label derived from it, kept so reports can group scenes; it is never an input
+    to any model and two scenes sharing a label do not share an arrangement.
+    """
+
     organ_radii: tuple[float, float, float]
     apex_taper: float
     tilt: tuple[float, float, float]
@@ -98,6 +112,14 @@ class OrganParameters:
     valve_radius_fraction: float
     vessel_radius_fraction: float
     vessel_length_fraction: float
+    ventricle_asymmetry: float = 0.0
+    """Relative sizing of the left against the right ventricle.
+
+    Positive enlarges the left and shrinks the right. One of the continuous arrangement
+    axes, because it changes the adjacency and containment relations measured between the
+    ventricles, the septum and the valves that sit on their surfaces.
+    """
+
     entity_scale: tuple[tuple[str, float], ...] = ()
     """Per-entity size overrides. Empty for a generated scene; an edit sets exactly one.
 
@@ -106,10 +128,22 @@ class OrganParameters:
     than assumed from the instruction.
     """
 
+    @property
+    def variant(self) -> Variant:
+        """Coarse label derived from the arrangement. Reporting only."""
+        if self.arrangement.mirror:
+            return Variant.MIRRORED
+        if self.arrangement.transpose:
+            return Variant.TRANSPOSED
+        if abs(self.arrangement.yaw) > 0.3:
+            return Variant.ROTATED
+        return Variant.NORMAL
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to plain data."""
         return {
             "family_id": self.family_id,
+            "arrangement": self.arrangement.to_dict(),
             "variant": str(self.variant),
             "organ_radii": list(self.organ_radii),
             "apex_taper": self.apex_taper,
@@ -129,6 +163,7 @@ class OrganParameters:
             "valve_radius_fraction": self.valve_radius_fraction,
             "vessel_radius_fraction": self.vessel_radius_fraction,
             "vessel_length_fraction": self.vessel_length_fraction,
+            "ventricle_asymmetry": self.ventricle_asymmetry,
             "entity_scale": [[name, value] for name, value in self.entity_scale],
         }
 
@@ -142,7 +177,13 @@ class OrganParameters:
 
         return cls(
             family_id=int(payload["family_id"]),
-            variant=Variant(payload["variant"]),
+            arrangement=(
+                Arrangement.from_dict(payload["arrangement"])
+                if "arrangement" in payload
+                else arrangement_for_variant(
+                    Variant(payload["variant"]), np.random.default_rng(0)
+                )
+            ),
             organ_radii=triple(payload["organ_radii"]),
             apex_taper=float(payload["apex_taper"]),
             tilt=triple(payload["tilt"]),
@@ -161,6 +202,7 @@ class OrganParameters:
             valve_radius_fraction=float(payload["valve_radius_fraction"]),
             vessel_radius_fraction=float(payload["vessel_radius_fraction"]),
             vessel_length_fraction=float(payload["vessel_length_fraction"]),
+            ventricle_asymmetry=float(payload.get("ventricle_asymmetry", 0.0)),
             entity_scale=tuple(
                 (str(name), float(value)) for name, value in payload.get("entity_scale", ())
             ),
@@ -180,16 +222,44 @@ class OrganParameters:
     def replace_scalar(self, field: str, value: float) -> OrganParameters:
         """Return a copy with one scalar parameter changed, used to build edit pairs."""
         from dataclasses import replace
+        from typing import Any, cast
 
-        return replace(self, **{field: value})
+        return replace(self, **cast(dict[str, Any], {field: value}))
 
 
 def _jitter(rng: np.random.Generator, base: float, spread: float) -> float:
     return float(base * (1.0 + rng.uniform(-spread, spread)))
 
 
+def arrangement_for_variant(variant: Variant, rng: np.random.Generator) -> Arrangement:
+    """A canonical arrangement for one of the four Step 7 labels.
+
+    Kept so that every Step 7 call site and test continues to mean what it meant. Step 8
+    scenes draw from the continuous space instead, where no finite set of labels covers
+    the arrangements a model will see.
+    """
+    yaw = float(rng.uniform(-0.12, 0.12))
+    if variant is Variant.ROTATED:
+        yaw = float(rng.choice([-1.0, 1.0]) * rng.uniform(0.38, 0.44))
+    return Arrangement(
+        mirror=variant is Variant.MIRRORED,
+        transpose=variant is Variant.TRANSPOSED,
+        yaw=yaw,
+        pitch=float(rng.uniform(-0.10, 0.10)),
+        roll=float(rng.uniform(-0.08, 0.08)),
+        septal_shift=0.0,
+        av_shift=0.0,
+        apex_swing=0.0,
+        chamber_asymmetry=0.0,
+    )
+
+
 def sample_parameters(
-    rng: np.random.Generator, family_id: int, variant: Variant
+    rng: np.random.Generator,
+    family_id: int,
+    variant: Variant | None = None,
+    *,
+    arrangement: Arrangement | None = None,
 ) -> OrganParameters:
     """Sample one organ.
 
@@ -210,19 +280,24 @@ def sample_parameters(
         _jitter(family_rng, 0.40, 0.14),
     )
 
-    yaw = float(rng.uniform(-0.12, 0.12))
-    if variant is Variant.ROTATED:
-        yaw = float(rng.choice([-1.0, 1.0]) * rng.uniform(0.38, 0.52))
+    if arrangement is None:
+        if variant is None:
+            arrangement = sample_arrangement(rng)
+        else:
+            arrangement = arrangement_for_variant(variant, rng)
+
+    # Every continuous axis lands on a parameter that moves structures relative to one
+    # another, so the relations measured from the finished organ move with it.
     return OrganParameters(
         family_id=family_id,
-        variant=variant,
+        arrangement=arrangement,
         organ_radii=(
             _jitter(rng, archetype[0], 0.06),
             _jitter(rng, archetype[1], 0.06),
             _jitter(rng, archetype[2], 0.06),
         ),
         apex_taper=_jitter(rng, 0.45, 0.15),
-        tilt=(yaw, float(rng.uniform(-0.10, 0.10)), float(rng.uniform(-0.08, 0.08))),
+        tilt=(arrangement.yaw, arrangement.pitch, arrangement.roll),
         wall_fraction=_jitter(rng, archetype_wall, 0.12),
         endocardium_fraction=_jitter(rng, 0.22, 0.15),
         epicardium_fraction=_jitter(rng, 0.20, 0.15),
@@ -238,12 +313,13 @@ def sample_parameters(
             _jitter(rng, 0.24, 0.10),
             _jitter(rng, 0.30, 0.10),
         ),
-        septal_offset=float(rng.uniform(-0.03, 0.03)),
-        av_plane=_jitter(rng, 0.12, 0.20),
+        septal_offset=float(rng.uniform(-0.03, 0.03)) + arrangement.septal_shift,
+        av_plane=_jitter(rng, 0.12, 0.20) + arrangement.av_shift,
         apex_drop=_jitter(rng, 0.30, 0.12),
-        anterior_offset=_jitter(rng, 0.30, 0.18),
+        anterior_offset=_jitter(rng, 0.30, 0.18) + arrangement.apex_swing,
         valve_thickness=_jitter(rng, 0.10, 0.15),
         valve_radius_fraction=_jitter(rng, 0.62, 0.12),
         vessel_radius_fraction=_jitter(rng, 0.30, 0.14),
         vessel_length_fraction=_jitter(rng, 0.75, 0.15),
+        ventricle_asymmetry=arrangement.chamber_asymmetry,
     )

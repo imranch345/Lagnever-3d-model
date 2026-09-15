@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -49,7 +49,7 @@ class _ReportsParameters(Protocol):
 
 __all__ = ["TrainingConfig", "LodBucketLoader", "Trainer", "build_model"]
 
-ArmName = Literal["A0", "A1", "A2", "A3", "A4", "A5", "A6"]
+ArmName = Literal["A0", "A1", "A1M", "A2", "A3", "A3L", "A3Lite", "A4", "A5", "A6"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,11 +168,23 @@ def build_model(
     *,
     text_features: int,
     geometry: GeometryConfig | None = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> tuple[nn.Module, dict[str, int]]:
     """Build one arm and return it with its parameter breakdown.
 
     ``A0`` is the appearance-driven baseline, sized to match the structured arm's
     parameter count before training starts.
+
+    Args:
+        arm: the ablation key.
+        builder: supplies the vocabulary sizes and the inverse-relation table.
+        text_features: width of the text conditioning vector.
+        geometry: geometry tokeniser and decoder sizes.
+        overrides: configuration fields applied **after** the ablation key, so a Step 9
+            experiment can vary one thing without inventing a new arm name for every
+            combination. Applied only to the structured arms; ``A0`` has no such fields
+            and passing overrides for it is an error rather than a silent no-op.
+
     """
     sizes = builder.vocabulary_sizes()
     structured = PrototypeConfig(
@@ -185,6 +197,11 @@ def build_model(
         geometry=geometry or GeometryConfig(),
     )
     if arm == "A0":
+        if overrides:
+            raise ValueError(
+                f"The appearance baseline has no {sorted(overrides)} to override; it has "
+                "no entity axis and no frame head."
+            )
         reference = LagnavPrototype(
             structured.with_ablation("A3"), builder.inverse_relation_table()
         )
@@ -201,7 +218,13 @@ def build_model(
         groups = cast(_ReportsParameters, model).parameter_groups()
         groups["matched_target"] = target
         return model, groups
-    model = LagnavPrototype(structured.with_ablation(arm), builder.inverse_relation_table())
+    prototype = structured.with_ablation(arm)
+    if overrides:
+        unknown = sorted(set(overrides) - {f.name for f in fields(prototype)})
+        if unknown:
+            raise ValueError(f"Unknown configuration fields {unknown}.")
+        prototype = replace(prototype, **cast(Any, dict(overrides)))
+    model = LagnavPrototype(prototype, builder.inverse_relation_table())
     return model, model.parameter_groups()
 
 

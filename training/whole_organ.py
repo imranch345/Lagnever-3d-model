@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import torch
-from torch import nn
 from torch.nn import functional as functional_ops
 
 from awr.config import DomainConfig
@@ -27,7 +26,6 @@ from datasets.whole_organ.corpus import WholeOrganScene
 from datasets.whole_organ.sampling import WholeOrganSampling
 from generation.neural.losses import initial_loss_strategy
 from generation.neural.nn.losses import LossInputs, PrototypeLoss
-from generation.neural.nn.model import LagnavPrototype
 from generation.neural.nn.whole_organ import WholeOrganBatch, WholeOrganBatchBuilder
 from generation.neural.three_d_latent import LOD_TOKEN_SCHEDULE
 from training.loop import _hard_negative_table, build_model
@@ -159,6 +157,7 @@ class WholeOrganTrainer:
         self.train_loader = WholeOrganLoader(
             train_scenes, self.builder, batch_size=config.batch_size, seed=config.seed
         )
+        self.eval_scenes = list(eval_scenes)
         self.eval_loader = WholeOrganLoader(
             eval_scenes,
             self.builder,
@@ -173,7 +172,7 @@ class WholeOrganTrainer:
         )
         self.text_features = int(probe.batch.text_features.shape[1])
         self.model, self.parameter_groups = build_model(
-            cast(Any, config.arm), self.builder, text_features=self.text_features
+            cast(Any, config.arm), cast(Any, self.builder), text_features=self.text_features
         )
         self.model.to(self.device_choice.device)
         self.loss = PrototypeLoss(
@@ -266,13 +265,23 @@ class WholeOrganTrainer:
         from experiments.step7.metrics import evaluate_whole_organ
 
         self.model.eval()
-        limit = batches if batches is not None else self.config.eval_batches
+        # The reported numbers must describe the whole held-out split. Capping the
+        # final evaluation at a batch count walks the level-of-detail buckets in order
+        # and stops partway, which silently biases the result toward whichever levels
+        # and arrangements happen to come first. The cap exists only to keep the
+        # periodic in-training checks cheap.
+        if full and batches is None:
+            limit = math.inf
+        else:
+            limit = batches if batches is not None else self.config.eval_batches
         totals: dict[str, list[float]] = {}
         count = 0
+        scenes_seen = 0
         for whole in self.eval_loader.epoch(0):
             if count >= limit:
                 break
             count += 1
+            scenes_seen += len(whole.scenes)
             values = evaluate_whole_organ(
                 self.model,
                 whole,
@@ -286,7 +295,50 @@ class WholeOrganTrainer:
                 totals.setdefault(key, []).append(value)
         summary = {key: sum(values) / len(values) for key, values in totals.items()}
         summary["eval_batches"] = float(count)
+        summary["eval_scenes"] = float(scenes_seen)
         return dict(summary)
+
+    def evaluate_by_variant(self) -> dict[str, float]:
+        """Metrics computed separately for each anatomical arrangement.
+
+        A model that ignores the relationship graph cannot tell the arrangements apart,
+        so it must do noticeably worse on the arrangements that differ from the
+        commonest one. A flat profile across variants is evidence that the graph is
+        either unused or unnecessary; a sloped profile is evidence it is being used.
+        """
+        from experiments.step7.metrics import evaluate_whole_organ
+
+        self.model.eval()
+        out: dict[str, float] = {}
+        by_variant: dict[str, list[WholeOrganScene]] = {}
+        for scene in self.eval_scenes:
+            by_variant.setdefault(str(scene.variant), []).append(scene)
+        for variant, scenes in sorted(by_variant.items()):
+            loader = WholeOrganLoader(
+                scenes,
+                self.builder,
+                batch_size=self.config.batch_size,
+                seed=self.config.seed + 2,
+                shuffle=False,
+                drop_last=False,
+            )
+            totals: dict[str, list[float]] = {}
+            for whole in loader.epoch(0):
+                values = evaluate_whole_organ(
+                    self.model,
+                    whole,
+                    self.slot_of,
+                    self.ids,
+                    device=self.device_choice.device,
+                    full=False,
+                    builder=self.builder,
+                )
+                for key, value in values.items():
+                    totals.setdefault(key, []).append(value)
+            for key, collected in totals.items():
+                out[f"variant_{variant}_{key}"] = sum(collected) / len(collected)
+            out[f"variant_{variant}_scenes"] = float(len(scenes))
+        return out
 
     def fit(self, *, checkpoint_dir: str | Path | None = None) -> RunManifest:
         """Train, then evaluate fully."""
@@ -301,7 +353,8 @@ class WholeOrganTrainer:
                 validation["step"] = float(step)
                 self.manifest.validation_history.append(validation)
         self.manifest.steps_completed = self.config.steps
-        final = self.evaluate(batches=self.config.eval_batches * 2, full=True)
+        final = self.evaluate(full=True)
+        final.update(self.evaluate_by_variant())
         final["step"] = float(self.config.steps)
         self.manifest.validation_history.append(final)
         self.manifest.results = dict(final)

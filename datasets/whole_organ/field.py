@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
-from datasets.whole_organ.parameters import OrganParameters, Variant
+from datasets.whole_organ.parameters import OrganParameters
 
 __all__ = [
     "WHOLE_ORGAN_ENTITIES",
@@ -173,7 +173,7 @@ class WholeOrganField:
     def __init__(self, parameters: OrganParameters) -> None:
         self.parameters = parameters
         self.rotation = parameters.rotation()
-        self.mirror = -1.0 if parameters.variant is Variant.MIRRORED else 1.0
+        self.mirror = -1.0 if parameters.arrangement.mirror else 1.0
         self.radii = np.asarray(parameters.organ_radii, dtype=np.float64)
         self.cavities = self._build_cavities()
         self.cavity_index = {cavity.entity_id: cavity for cavity in self.cavities}
@@ -188,7 +188,13 @@ class WholeOrganField:
     def _build_cavities(self) -> tuple[_Cavity, ...]:
         parameters = self.parameters
         radii = self.radii
+        # Ventricle asymmetry sizes the two ventricles against each other. It moves the
+        # septum between them and the valves that sit on their surfaces, so it changes
+        # measured adjacency rather than only apparent size.
+        asymmetry = float(parameters.ventricle_asymmetry)
         ventricle = np.asarray(parameters.ventricle_cavity) * radii
+        left_ventricle = ventricle * (1.0 + asymmetry)
+        right_ventricle = ventricle * (1.0 - asymmetry)
         atrium = np.asarray(parameters.atrium_cavity) * radii
         side = radii[0] * 0.45 * self.mirror
         drop = -radii[1] * parameters.apex_drop
@@ -200,8 +206,12 @@ class WholeOrganField:
         right_x = -side + parameters.septal_offset
         span = abs(left_x - right_x)
         limit = max(0.02, (span - min_gap) / 2.0)
-        ventricle = np.array([min(ventricle[0], limit), ventricle[1], ventricle[2]])
-        atrium = np.array([min(atrium[0], limit), atrium[1], atrium[2]])
+        def clamp(extent: FloatArray) -> FloatArray:
+            return np.array([min(extent[0], limit), extent[1], extent[2]])
+
+        left_ventricle = clamp(left_ventricle)
+        right_ventricle = clamp(right_ventricle)
+        atrium = clamp(atrium)
 
         def cavity(entity_id: str, centre: FloatArray, radii: FloatArray) -> _Cavity:
             return _Cavity(entity_id, centre, radii * parameters.scale_for(entity_id))
@@ -210,12 +220,12 @@ class WholeOrganField:
             cavity(
                 "heart.left_ventricle",
                 np.array([side + parameters.septal_offset, drop, -depth * 0.35]),
-                ventricle,
+                left_ventricle,
             ),
             cavity(
                 "heart.right_ventricle",
                 np.array([-side + parameters.septal_offset, drop * 0.94, depth * 0.72]),
-                ventricle * np.array([0.92, 0.94, 0.92]),
+                right_ventricle * np.array([0.92, 0.94, 0.92]),
             ),
             cavity(
                 "heart.left_atrium",
@@ -299,7 +309,7 @@ class WholeOrganField:
         The transposed variant swaps them, which is the whole point: the entity set is
         unchanged and only the connection differs.
         """
-        if self.parameters.variant is Variant.TRANSPOSED:
+        if self.parameters.arrangement.transpose:
             return (
                 ("heart.pulmonary_valve", "heart.left_ventricle"),
                 ("heart.aortic_valve", "heart.right_ventricle"),
@@ -383,7 +393,9 @@ class WholeOrganField:
         """Implicit value of the organ envelope: below 1.0 is inside."""
         taper = self._taper(local)
         radii = self.radii * scale
-        scaled = local / np.stack([radii[0] * taper, np.full_like(taper, radii[1]), radii[2] * taper], axis=-1)
+        scaled = local / np.stack(
+            [radii[0] * taper, np.full_like(taper, radii[1]), radii[2] * taper], axis=-1
+        )
         return np.asarray((scaled**2).sum(axis=-1), dtype=np.float64)
 
     def organ_occupancy(self, points: FloatArray) -> BoolArray:
@@ -434,9 +446,7 @@ class WholeOrganField:
         # the pre-registered rule states. An earlier version also required the pair to be
         # the two nearest cavities overall, which is a condition the rule does not make
         # and which lost the septum whenever an atrium happened to be closer.
-        gap_of = {
-            cavity.entity_id: gaps[index] for index, cavity in enumerate(self.cavities)
-        }
+        gap_of = {cavity.entity_id: gaps[index] for index, cavity in enumerate(self.cavities)}
         septal_pairs = (
             (
                 "heart.interventricular_septum",
@@ -476,7 +486,9 @@ class WholeOrganField:
         """Points owned by one entity."""
         return np.asarray(self.ownership(points) == self.slot_of[entity_id], dtype=np.bool_)
 
-    def scene_occupancy(self, points: FloatArray, entity_ids: Sequence[str] | None = None) -> BoolArray:
+    def scene_occupancy(
+        self, points: FloatArray, entity_ids: Sequence[str] | None = None
+    ) -> BoolArray:
         """Occupancy of the entities visible at a level of detail.
 
         Level-specific: the union of what that level shows, which is what gives the
@@ -489,7 +501,9 @@ class WholeOrganField:
         return np.asarray(np.isin(labels, wanted), dtype=np.bool_)
 
     # ------------------------------------------------------------------
-    def sample_points(self, count: int, rng: np.random.Generator, *, jitter: float = 0.04) -> FloatArray:
+    def sample_points(
+        self, count: int, rng: np.random.Generator, *, jitter: float = 0.04
+    ) -> FloatArray:
         """Query points concentrated where the organ is."""
         uniform = rng.uniform(-1.0, 1.0, size=(count // 3, 3))
         directions = rng.normal(size=(count - count // 3, 3))
@@ -497,11 +511,10 @@ class WholeOrganField:
         radii = rng.uniform(0.2, 1.15, size=(directions.shape[0], 1))
         shell = directions * radii * self.radii * (1.0 + self.parameters.pericardium_gap)
         shell = shell @ self.rotation.T + rng.normal(scale=jitter, size=shell.shape)
-        return np.clip(np.concatenate([uniform, shell]), -1.0, 1.0)
+        stacked: FloatArray = np.clip(np.concatenate([uniform, shell]), -1.0, 1.0)
+        return stacked
 
-    def proposal_points(
-        self, entity_id: str, count: int, rng: np.random.Generator
-    ) -> FloatArray:
+    def proposal_points(self, entity_id: str, count: int, rng: np.random.Generator) -> FloatArray:
         """Candidate points near where an entity was constructed.
 
         Thin structures such as valves and septa occupy a fraction of a percent of the
@@ -519,7 +532,11 @@ class WholeOrganField:
             local = cavity.centre + directions * radii * cavity.radii
         elif any(annulus.entity_id == entity_id for annulus in self.annuli):
             annulus = next(a for a in self.annuli if a.entity_id == entity_id)
-            helper = np.array([0.0, 0.0, 1.0]) if abs(annulus.axis[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+            helper = (
+                np.array([0.0, 0.0, 1.0])
+                if abs(annulus.axis[2]) < 0.9
+                else np.array([1.0, 0.0, 0.0])
+            )
             first = _normalise(np.cross(annulus.axis, helper))
             second = np.cross(annulus.axis, first)
             angle = rng.uniform(0.0, 2.0 * np.pi, size=count)
@@ -527,7 +544,8 @@ class WholeOrganField:
             along = rng.uniform(-1.6, 1.6, size=count) * annulus.thickness
             local = (
                 annulus.centre
-                + radius[:, None] * (np.cos(angle)[:, None] * first + np.sin(angle)[:, None] * second)
+                + radius[:, None]
+                * (np.cos(angle)[:, None] * first + np.sin(angle)[:, None] * second)
                 + along[:, None] * annulus.axis
             )
         elif any(tube.entity_id == entity_id for tube in self.tubes):
@@ -557,7 +575,8 @@ class WholeOrganField:
                 midpoint = (first_cavity.centre + second_cavity.centre) / 2.0
                 spread = np.maximum(first_cavity.radii, second_cavity.radii)
                 local = midpoint + rng.normal(size=(count, 3)) * spread * np.array([0.45, 0.8, 0.8])
-                return np.clip(local @ self.rotation.T, -1.0, 1.0)
+                placed: FloatArray = np.clip(local @ self.rotation.T, -1.0, 1.0)
+                return placed
             else:
                 radii = rng.uniform(0.35, 0.95, size=(count, 1))
             local = directions * radii * self.radii + rng.normal(size=(count, 3)) * scale * 0.03
@@ -609,12 +628,14 @@ class WholeOrganField:
         for entity_id, values in statistics.items():
             centroid = values["centroid"]
             extent = np.maximum(values["extent"], 1e-3)
-            frame = np.concatenate([centroid, np.log(extent), np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])])
+            frame = np.concatenate(
+                [centroid, np.log(extent), np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])]
+            )
             frames[entity_id] = [float(x) for x in frame]
         return frames
 
-    def present_entities(self, statistics: Mapping[str, Mapping[str, FloatArray]]) -> tuple[str, ...]:
+    def present_entities(
+        self, statistics: Mapping[str, Mapping[str, FloatArray]]
+    ) -> tuple[str, ...]:
         """Entities that actually own enough volume to be measurable."""
-        return tuple(
-            entity_id for entity_id in self.entity_ids if entity_id in statistics
-        )
+        return tuple(entity_id for entity_id in self.entity_ids if entity_id in statistics)

@@ -1,8 +1,10 @@
 # Lagnav 3D
 
 **R&D prototype. Step 4 built the deterministic foundation, Step 5 designed the neural
-architecture, and Step 6 implemented it, generated a synthetic corpus and ran the first
-controlled experiment. Results are on synthetic data only and make no medical claim.**
+architecture, Step 6 implemented it and ran the first controlled experiment, Step 7
+stress-tested the representation to find out which parts are actually necessary, and
+Step 8 removed the teacher-forced placement that made the relational question unanswerable.
+Results are on synthetic data only and make no medical claim.**
 
 Lagnav 3D is a research project aiming at a *language-controlled 3D anatomical
 intelligence system*: you describe anatomy in words, and a structured, editable,
@@ -18,6 +20,11 @@ This repository is **not** that system. It contains two things:
 3. **A working prototype and a first experiment** (Step 6): a PyTorch implementation
    of that architecture, a generated synthetic corpus, a parameter-matched
    appearance-driven baseline, and measured results.
+4. **A representation stress test** (Step 7): a whole-organ corpus in which
+   relationships are measured rather than asserted, ablations with matched parameters,
+   perturbation experiments that damage one channel at a time, and persistent local
+   editing. Step 7 also withdrew three earlier conclusions that turned out to rest on
+   setups which could not test them.
 
 Nothing here calls a text-to-3D model, and no external model is part of the
 architecture. Where a research decision has not been made, the code contains a typed
@@ -26,7 +33,76 @@ interface and a `TODO`, not an invented answer.
 * Neural design: **[docs/neural-architecture.md](docs/neural-architecture.md)**
 * Prototype: **[docs/step-6-prototype.md](docs/step-6-prototype.md)**
 * First experiment: **[docs/step-6-experiment-report.md](docs/step-6-experiment-report.md)**
+* Representation stress test: **[docs/step7/](docs/step7/README.md)**
+* Predicted placement and relational inference: **[docs/STEP_8_COMPLETION_REPORT.md](docs/STEP_8_COMPLETION_REPORT.md)**
+* Step 8 architecture: **[docs/STEP_8_ARCHITECTURE.md](docs/STEP_8_ARCHITECTURE.md)**
+* Placement learning: **[docs/STEP_9_COMPLETION_REPORT.md](docs/STEP_9_COMPLETION_REPORT.md)**
+* Step 9 architecture: **[docs/STEP_9_ARCHITECTURE.md](docs/STEP_9_ARCHITECTURE.md)**
 * Decision records: [docs/adr/](docs/adr/)
+
+### What Step 7 changed about how to read Step 6
+
+Step 6 reported that the typed graph encoder was not earning its parameters. **That
+conclusion is withdrawn.** The Step 6 corpus carried a single relationship graph across
+all 2,000 scenes, so the graph encoder read a constant input and the comparison could
+not have come out any other way. It was untestable, not refuted.
+
+Step 7 rebuilt the data so the question is answerable, and found four further defects of
+the same kind before any conclusion could be drawn. The details are in
+[docs/step7/02_preregistration_amendments.md](docs/step7/02_preregistration_amendments.md).
+
+### Step 9, in one line
+
+A lookup table keyed on entity identity alone places structures with a translation error of
+0.1605. Three of the five Step 8 arms do worse than that, and the two Step 9 changes tested
+moved it by less than the seed spread. Placement is not a tuning problem: the frame target is
+a scene-global centroid predicted from a local view, with a rotation component that is
+constant. Step 10 should change what is predicted, not how hard it is optimised.
+
+### Step 8, in one table
+
+Five arms on a corpus of continuous arrangements, three seeds, **predicted placement**.
+`test_seen` holds out whole organ families:
+
+| metric | A3Lite untyped graph, 1.25M | A1M no graph, 3.13M | A3 full typed graph, 3.23M |
+| --- | --- | --- | --- |
+| entity ownership IoU | 0.0902 | 0.0741 | 0.0908 |
+| part-control success | 0.0544 | 0.0330 | 0.0596 |
+| relation accuracy | 0.7791 | 0.7485 | 0.8119 |
+| relation-blind floor | 0.8110 | 0.8110 | 0.8110 |
+
+`A1M` holds 3.7 times `A3Lite`'s relational parameter budget and loses on every metric, so
+relational structure beats capacity. `A3` costs 3.85 times `A3Lite`'s relational budget for
+a difference inside the seed spread.
+
+Two findings cut the other way and matter more. Under **predicted** placement only one arm
+clears the relation-blind floor, and only on one split of four. And on a composition of two
+transformations seen separately but never together, the arms that read the graph score
+**below** the floor while the arms that cannot read it score above: reading relations you
+have not learned to compose is worse than ignoring them.
+
+### Step 7, in one table
+
+Six arms on a whole-organ corpus carrying 164 distinct relationship graphs, three seeds on
+the headline arms, full 160-scene held-out evaluation:
+
+| metric | A3 full graph, 3.09M | A1 no graph, 0.43M | A0 appearance, 3.10M |
+| --- | --- | --- | --- |
+| part-control success | 0.7218 | 0.7089 | 0.0016 |
+| entity ownership IoU | 0.6339 | 0.6304 | 0.0164 |
+| ownership IoU, placement inferred | 0.3020 | 0.2914 | 0.0164 |
+| arrangement response, inferred | 0.0359 | 0.0000 | 0.0000 |
+
+Two findings point in opposite directions and both hold. **The entity axis is essential**:
+an appearance model with the same parameter budget is 450 times worse at saying which
+structure owns which region. **The graph transformer is not**: it costs 86% of the model
+and a version 7.2 times smaller matches it, while recovering only 3.6% of the arrangement
+information the corpus makes available.
+
+Reading either number requires knowing two things the tables above state and most such
+tables do not: whether the model was handed ground-truth placement, and that a
+relation-blind predictor scores 0.8878 on the relation metric rather than zero. Under
+inferred placement, **every arm scores below that floor.**
 
 ### First experiment, in one table
 
@@ -164,7 +240,25 @@ The rest of the body is explicitly out of scope.
 | **Step 6** training loop, checkpoints, manifests       | Implemented                                          |
 | **Step 6** seven first-wave losses                     | Implemented; relationship objectives held out        |
 | **Step 6** metrics, diagnostics, exporters and views   | Implemented                                          |
-| **Step 6** experiment heart-001 with five ablations    | Run; results on synthetic data only                  |
+| **Step 6** experiment heart-001 with five ablations    | Run; **graph conclusion withdrawn as untestable**    |
+| **Step 7** whole-organ generator, relations measured   | Implemented; 1,600 scenes, 164 relationship graphs   |
+| **Step 7** anatomical variants crossed with families   | Implemented and guarded by the generator             |
+| **Step 7** perturbation harness, partial-AWR cases     | Implemented and tested                               |
+| **Step 7** local edit head, two scopes, plus regeneration control | Implemented, trained, measured            |
+| **Step 7** relation-blind floor and placement conditions | Implemented; both required to read any relation number |
+| **Step 7** convergence criterion, fixed in advance     | Implemented; the baseline's failure found a defect in every arm |
+| **Step 7** six-arm suite, three seeds, 160 held-out scenes | Run; results on synthetic data only              |
+| **Step 7** architecture verdicts                       | Entity axis KEEP; graph transformer SIMPLIFY; typed relations REMOVE; level of detail and editing REVISE |
+| **Step 8** continuous arrangement corpus               | Implemented; 1,950 scenes, 9 arrangement axes, 4 generalisation splits |
+| **Step 8** untyped graph attention (A3Lite)            | Implemented; 692,864 parameters, provably relation-type blind |
+| **Step 8** predicted placement with a curriculum       | Implemented; final teacher forcing 0.0, evaluation never sees a true frame |
+| **Step 8** nested level-of-detail objectives           | Implemented; containment exactly 1.0, preservation 0.97 |
+| **Step 8** five-arm suite, three seeds, four splits    | Run; results on synthetic data only |
+| **Step 8** architecture verdicts                       | Untyped graph KEEP; typed relations REMOVE; entity axis KEEP; nested LOD KEEP; predicted placement REVISE |
+| **Step 9** placement-blind floor                       | Implemented; a lookup table on entity identity, 0.1605 to 0.1750 by split |
+| **Step 9** frame decomposition                         | Implemented; rotation shown to be structurally zero under the current target |
+| **Step 9** scene context and objective alignment       | Implemented and tested; neither moved placement beyond seed noise |
+| **Step 9** verdict                                     | Placement is at the floor. The frame target, not the head, is the limiting factor |
 
 ### Deliberately not implemented
 
@@ -175,8 +269,10 @@ pretend implementation.
 - **A learned language model.** The control path is the Step 4 deterministic engine,
   used as an oracle and labelled as one. Only the language-anatomy alignment head is
   trained from text features.
-- **Material and animation decoders**, image and multi-view modalities, cross-modal
-  alignment, and local geometric editing. Only presentation and level-of-detail edits
+- **Material and animation decoders**, image and multi-view modalities, and cross-modal
+  alignment. Local geometric editing was implemented in Step 7 and is measured there:
+  the locality mechanism works and the edit head's accuracy does not. Only presentation
+  and level-of-detail edits
   are implemented.
 - **Any real data.** The corpus is generated by this project. No dataset has been
   downloaded, and `datasets/raw/` is empty.

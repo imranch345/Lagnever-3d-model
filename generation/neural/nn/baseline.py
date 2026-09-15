@@ -97,9 +97,16 @@ class AppearanceBaseline(nn.Module):
         lod: int | None = None,
         use_predicted_frames: bool = False,
         token_prefix: int | None = None,
+        teacher_forcing: float = 1.0,
     ) -> ModelOutput:
-        """Run the baseline. Frame arguments are accepted and ignored: it has none."""
-        del use_predicted_frames
+        """Run the baseline. Frame arguments are accepted and ignored: it has none.
+
+        The baseline has no per-entity frames, so supplied and predicted placement are the
+        same thing for it and the teacher-forcing schedule has nothing to act on. Accepting
+        both arguments keeps it callable wherever a structured arm is, which is what makes
+        the entity-axis ladder a like-for-like comparison.
+        """
+        del use_predicted_frames, teacher_forcing
         level = batch.structure.lod if lod is None else lod
         active = token_prefix or self.config.geometry.tokens_at(level)
 

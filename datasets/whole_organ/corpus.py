@@ -23,12 +23,12 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from datasets.whole_organ.arrangement import Arrangement, classify_arrangement
 from datasets.whole_organ.field import (
     CHAMBERS,
     SEPTA,
     VALVES,
     VESSELS,
-    WALL_LAYERS,
     WHOLE_ORGAN_ENTITIES,
     WholeOrganField,
 )
@@ -72,7 +72,6 @@ class WholeOrganScene:
 
     scene_id: str
     family_id: int
-    variant: Variant
     seed: int
     ontology_id: str
     ontology_version: str
@@ -83,6 +82,21 @@ class WholeOrganScene:
     counts: dict[str, int]
     edges: tuple[MeasuredEdge, ...]
     data_label: str = DATA_LABEL
+
+    @property
+    def arrangement(self) -> Arrangement:
+        """Where this scene sits in the continuous arrangement space."""
+        return self.parameters.arrangement
+
+    @property
+    def variant(self) -> Variant:
+        """Coarse label derived from the arrangement. Reporting only, never an input."""
+        return self.parameters.variant
+
+    @property
+    def region(self) -> str:
+        """Which held-out region this scene's arrangement belongs to."""
+        return classify_arrangement(self.parameters.arrangement)
 
     def field(self) -> WholeOrganField:
         """Rebuild the analytic field from the stored parameters."""
@@ -122,6 +136,7 @@ class WholeOrganScene:
             "scene_id": self.scene_id,
             "family_id": self.family_id,
             "variant": str(self.variant),
+            "region": self.region,
             "seed": self.seed,
             "data_label": self.data_label,
             "ontology_id": self.ontology_id,
@@ -140,7 +155,6 @@ class WholeOrganScene:
         return cls(
             scene_id=str(payload["scene_id"]),
             family_id=int(payload["family_id"]),
-            variant=Variant(payload["variant"]),
             seed=int(payload["seed"]),
             ontology_id=str(payload["ontology_id"]),
             ontology_version=str(payload["ontology_version"]),
@@ -158,8 +172,9 @@ def build_scene(
     *,
     scene_index: int,
     family_id: int,
-    variant: Variant,
     lod: int,
+    variant: Variant | None = None,
+    arrangement: Arrangement | None = None,
     ontology_id: str = "lagnav.heart",
     ontology_version: str = "0.1.0",
     max_attempts: int = 24,
@@ -169,11 +184,12 @@ def build_scene(
     Raises:
         RuntimeError: if no sample succeeds. Presence must be uniform across variants or
             the variant leaks through a channel other than the relationship graph.
+
     """
     for attempt in range(max_attempts):
         seed = scene_index * 97 + attempt
         rng = np.random.default_rng(seed)
-        parameters = sample_parameters(rng, family_id, variant)
+        parameters = sample_parameters(rng, family_id, variant, arrangement=arrangement)
         organ = WholeOrganField(parameters)
         statistics = organ.entity_statistics(np.random.default_rng(seed + 11))
         if len(statistics) < len(WHOLE_ORGAN_ENTITIES):
@@ -182,7 +198,6 @@ def build_scene(
         return WholeOrganScene(
             scene_id=f"whole-{scene_index:06d}",
             family_id=family_id,
-            variant=variant,
             seed=seed,
             ontology_id=ontology_id,
             ontology_version=ontology_version,
@@ -194,7 +209,7 @@ def build_scene(
             edges=edges,
         )
     raise RuntimeError(
-        f"Could not generate a complete organ for family {family_id} variant {variant} in "
+        f"Could not generate a complete organ for family {family_id} in "
         f"{max_attempts} attempts. Fix the generator rather than accepting a scene with a "
         "missing entity."
     )
@@ -213,6 +228,8 @@ class WholeOrganManifest:
     lod_distribution: Mapping[int, int]
     distinct_relation_graphs: int
     entity_count: int
+    variants_per_family: Mapping[str, int] = field(default_factory=dict)
+    split_variants: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     data_label: str = DATA_LABEL
     notes: tuple[str, ...] = field(default_factory=tuple)
 
@@ -228,6 +245,10 @@ class WholeOrganManifest:
             "lod_distribution": {str(k): v for k, v in self.lod_distribution.items()},
             "distinct_relation_graphs": self.distinct_relation_graphs,
             "entity_count": self.entity_count,
+            "variants_per_family": dict(self.variants_per_family),
+            "split_variants": {
+                split: dict(counts) for split, counts in self.split_variants.items()
+            },
             "data_label": self.data_label,
             "notes": list(self.notes),
         }
@@ -245,6 +266,13 @@ class WholeOrganManifest:
             lod_distribution={int(k): int(v) for k, v in payload["lod_distribution"].items()},
             distinct_relation_graphs=int(payload["distinct_relation_graphs"]),
             entity_count=int(payload["entity_count"]),
+            variants_per_family={
+                str(k): int(v) for k, v in payload.get("variants_per_family", {}).items()
+            },
+            split_variants={
+                str(split): {str(k): int(v) for k, v in counts.items()}
+                for split, counts in payload.get("split_variants", {}).items()
+            },
             data_label=str(payload.get("data_label", DATA_LABEL)),
             notes=tuple(payload.get("notes", ())),
         )
@@ -295,23 +323,52 @@ def generate_corpus(
     lod_counts: dict[int, int] = {}
     signatures: set[str] = set()
     variants = list(Variant)
+    family_variants: dict[int, set[str]] = {}
+    split_variants: dict[str, dict[str, int]] = {name: {} for name in _SPLITS}
     try:
         for index in range(scenes):
+            # Family, variant and level of detail must vary *independently*. Deriving
+            # the variant from ``index % len(variants)`` aliases it onto the family
+            # whenever the variant count divides the family count, which confounds the
+            # two and leaves each family stuck in a single arrangement. Advancing the
+            # variant once per full pass over the families removes the aliasing, so
+            # every family is seen in every variant.
             family_id = index % families
-            variant = variants[index % len(variants)]
+            variant = variants[(index // families) % len(variants)]
             lod = int(lod_choices[index % len(lod_choices)])
-            scene = build_scene(
-                scene_index=index, family_id=family_id, variant=variant, lod=lod
-            )
+            scene = build_scene(scene_index=index, family_id=family_id, variant=variant, lod=lod)
             split = assignment[family_id]
             handles[split].write(json.dumps(scene.to_dict(), separators=(",", ":")) + "\n")
             counts[split] += 1
             variant_counts[str(variant)] = variant_counts.get(str(variant), 0) + 1
+            family_variants.setdefault(family_id, set()).add(str(variant))
+            bucket = split_variants[split]
+            bucket[str(variant)] = bucket.get(str(variant), 0) + 1
             lod_counts[lod] = lod_counts.get(lod, 0) + 1
-            signatures.add("|".join(sorted(f"{e.subject}|{e.relation}|{e.object}" for e in scene.edges)))
+            signatures.add(
+                "|".join(sorted(f"{e.subject}|{e.relation}|{e.object}" for e in scene.edges))
+            )
     finally:
         for handle in handles.values():
             handle.close()
+
+    # Guard against the confound that variant aliasing produces: if a family only ever
+    # appears in one arrangement, or a split is missing an arrangement entirely, then
+    # "same organ, different relations" is never actually presented and the graph
+    # experiments measure family differences rather than relation differences.
+    starved = sorted(f for f, seen in family_variants.items() if len(seen) < len(variants))
+    if starved:
+        raise ValueError(
+            f"{len(starved)} of {families} families cover fewer than {len(variants)} "
+            f"variants (first: {starved[:5]}). Variant and family are confounded."
+        )
+    thin = {
+        split: sorted(set(str(v) for v in variants) - set(seen))
+        for split, seen in split_variants.items()
+        if counts[split] and set(str(v) for v in variants) - set(seen)
+    }
+    if thin:
+        raise ValueError(f"Splits missing variants: {thin}.")
 
     manifest = WholeOrganManifest(
         corpus_id=corpus_id or f"whole-organ-{scenes}-{families}",
@@ -323,6 +380,10 @@ def generate_corpus(
         lod_distribution=lod_counts,
         distinct_relation_graphs=len(signatures),
         entity_count=len(WHOLE_ORGAN_ENTITIES),
+        variants_per_family={
+            str(family): len(seen) for family, seen in sorted(family_variants.items())
+        },
+        split_variants={split: dict(seen) for split, seen in split_variants.items()},
         notes=(
             "The organ is generated as a whole and then segmented; no entity is placed "
             "independently.",
@@ -331,7 +392,9 @@ def generate_corpus(
             "Synthetic research data. Not anatomy, not validated, not clinical.",
         ),
     )
-    (target / "manifest.json").write_text(json.dumps(manifest.to_dict(), indent=2), encoding="utf-8")
+    (target / "manifest.json").write_text(
+        json.dumps(manifest.to_dict(), indent=2), encoding="utf-8"
+    )
     return manifest
 
 

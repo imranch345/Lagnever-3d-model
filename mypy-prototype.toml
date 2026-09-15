@@ -1,6 +1,7 @@
 # Type-checking configuration for the tier-two prototype packages (ADR 0010).
 #
 #   mypy --config-file mypy-prototype.toml generation/neural/nn datasets/synthetic \
+#        datasets/whole_organ \
 #        training visualization experiments
 #
 # Python 3.12 is used only because NumPy's shipped stubs are written in 3.12 type

@@ -1,6 +1,6 @@
 """Generate the whole-organ synthetic corpus.
 
-    python -m datasets.whole_organ.cli --scenes 1600 --families 40 \
+python -m datasets.whole_organ.cli --scenes 1600 --families 40 \
         --out datasets/processed/whole_organ_1600
 """
 

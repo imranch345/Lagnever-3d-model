@@ -26,6 +26,11 @@ TIER_ONE_PACKAGES = (
 TIER_TWO_PACKAGES = (
     "generation/neural/nn",
     "datasets/synthetic",
+    # The Step 7 whole-organ generator evaluates occupancy fields over point arrays, the
+    # same kind of work as the tier-two synthetic generator, and belongs on the same side
+    # of the boundary. The tier-one rule protects the representation layer, not every
+    # file that happens to sit under a tier-one package.
+    "datasets/whole_organ",
     "training",
     "visualization",
     "experiments",

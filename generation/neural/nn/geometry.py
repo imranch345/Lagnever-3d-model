@@ -119,6 +119,97 @@ class FrameHead(nn.Module):
         return frames
 
 
+class FramePredictor(nn.Module):
+    """Step 8: predicts each entity's canonical frame, and is meant to be used.
+
+    The Step 7 frame head was a single zero-initialised linear layer, 3,084 parameters,
+    trained under an objective that never needed it because evaluation supplied the true
+    frames. Asked to work without them, entity ownership IoU halved. That is not
+    evidence that placement cannot be inferred; it is evidence that nothing had tried.
+
+    This head is a small residual MLP over the contextualised entity latent. It reads the
+    latent *after* the graph encoder, so relational information is the route by which an
+    entity's neighbours can influence where it goes. For a no-graph arm the latent carries
+    no neighbour information and the head can only place entities by identity, which is
+    exactly the comparison Step 8 wants to make.
+
+    The output contract is unchanged: ``[..., 12]`` as three translation components,
+    three log-scale components and a 6D rotation. Changing it would invalidate every
+    decoder and metric downstream.
+    """
+
+    def __init__(
+        self,
+        entity_width: int,
+        *,
+        hidden: int = 256,
+        layers: int = 2,
+        initial_log_scale: float = -1.9,
+        scene_context: bool = False,
+    ) -> None:
+        super().__init__()
+        self.scene_context = scene_context
+        self.norm = nn.LayerNorm(entity_width)
+        # Step 9, hypothesis P4. The frame target is a scene-**global** centroid, while the
+        # head reads a latent whose graph attention reaches roughly four neighbours and has
+        # no global pooling anywhere. Placing an entity correctly therefore requires
+        # information the head has never been given. This concatenates a summary of the
+        # scene's present entities, which is the smallest change that supplies it.
+        #
+        # Off by default, so the Step 8 head is preserved exactly and the comparison is
+        # between two configurations of one module rather than between two modules.
+        self.context_norm = nn.LayerNorm(entity_width) if scene_context else None
+        blocks: list[nn.Module] = []
+        width = entity_width * (2 if scene_context else 1)
+        for _ in range(layers):
+            blocks.extend([nn.Linear(width, hidden), nn.GELU()])
+            width = hidden
+        self.trunk = nn.Sequential(*blocks)
+        self.projection = nn.Linear(width, 12)
+        # Start at the canonical frame: origin, a plausible scale, identity rotation.
+        # An untrained head then produces a sane scene rather than a degenerate one, and
+        # training moves away from that rather than out of a numerical hole.
+        nn.init.zeros_(self.projection.weight)
+        with torch.no_grad():
+            bias = torch.zeros(12)
+            bias[3:6] = initial_log_scale
+            bias[6] = 1.0
+            bias[10] = 1.0
+            self.projection.bias.copy_(bias)
+
+    def forward(
+        self, entity_latent: torch.Tensor, context: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Return ``[B, N, 12]`` frames.
+
+        Args:
+            entity_latent: ``[B, N, W]`` after the relational encoder.
+            context: ``[B, W]`` scene summary, required when ``scene_context`` is set and
+                rejected otherwise, so a configuration mismatch fails loudly rather than
+                silently dropping the signal the experiment is testing.
+
+        """
+        normed = self.norm(entity_latent)
+        if self.scene_context:
+            if context is None:
+                raise ValueError(
+                    "This frame predictor was built with scene_context=True and needs a "
+                    "scene summary; passing None would silently disable the mechanism "
+                    "under test."
+                )
+            assert self.context_norm is not None
+            summary = self.context_norm(context).unsqueeze(1).expand_as(normed)
+            normed = torch.cat([normed, summary], dim=-1)
+        elif context is not None:
+            raise ValueError(
+                "This frame predictor was built without scene context; passing one would "
+                "be ignored, which is worse than failing."
+            )
+        hidden: torch.Tensor = self.trunk(normed)
+        frames: torch.Tensor = self.projection(hidden)
+        return frames
+
+
 class _TokenRefinementBlock(nn.Module):
     """Self-attention over one entity's token block, then a small feed-forward."""
 

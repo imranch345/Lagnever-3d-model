@@ -47,7 +47,9 @@ def predicted_centroids(
         owned = predicted == slot
         counts = owned.sum(dim=1)
         weights = owned.to(points.dtype).unsqueeze(-1)
-        centroid = (points * weights).sum(dim=1) / counts.clamp_min(1).unsqueeze(-1).to(points.dtype)
+        centroid = (points * weights).sum(dim=1) / counts.clamp_min(1).unsqueeze(-1).to(
+            points.dtype
+        )
         out[slot] = torch.where(
             (counts >= minimum).unsqueeze(-1), centroid, torch.full_like(centroid, float("nan"))
         )
@@ -146,10 +148,18 @@ def evaluate_whole_organ(
     device: torch.device,
     full: bool = False,
     builder: WholeOrganBatchBuilder | None = None,
+    use_predicted_frames: bool = False,
 ) -> dict[str, float]:
-    """Evaluate one batch on every Step 7 category."""
+    """Evaluate one batch on every Step 7 category.
+
+    ``use_predicted_frames`` selects the condition. With it false the scene's own entity
+    frames are supplied, so the model is asked only what shape to put at a given place.
+    With it true the model must infer placement from structure, relations and text, which
+    is the condition in which a relationship graph could earn its parameters. Both are
+    reported; see amendment A8.
+    """
     batch = whole.batch.to(device)
-    output = model(batch)
+    output = model(batch, use_predicted_frames=use_predicted_frames)
     slots = [int(slot) for slot in batch.structure.visible_slots]
 
     values = dict(scene_geometry(output, batch).values)
@@ -159,15 +169,30 @@ def evaluate_whole_organ(
     values["placement_error"] = placement_error(centroids, whole.scenes, slot_of)
 
     if full:
-        values.update(_level_of_detail(model, whole, device))
+        values.update(
+            _level_of_detail(model, whole, device, use_predicted_frames=use_predicted_frames)
+        )
         if builder is not None:
-            values.update(counterfactual_analysis(model, whole, builder, slot_of, device=device))
+            values.update(
+                counterfactual_analysis(
+                    model,
+                    whole,
+                    builder,
+                    slot_of,
+                    device=device,
+                    use_predicted_frames=use_predicted_frames,
+                )
+            )
     return values
 
 
 @torch.no_grad()
 def _level_of_detail(
-    model: torch.nn.Module, whole: WholeOrganBatch, device: torch.device
+    model: torch.nn.Module,
+    whole: WholeOrganBatch,
+    device: torch.device,
+    *,
+    use_predicted_frames: bool = False,
 ) -> dict[str, float]:
     """Detail gain by level, scored against each level's own target."""
     batch = whole.batch.to(device)
@@ -175,7 +200,7 @@ def _level_of_detail(
     ious: list[float] = []
     for level in (1, 2, 3):
         prefix = LOD_TOKEN_SCHEDULE[min(level, len(LOD_TOKEN_SCHEDULE) - 1)]
-        output = model(batch, token_prefix=prefix)
+        output = model(batch, token_prefix=prefix, use_predicted_frames=use_predicted_frames)
         target = whole.lod_targets[level].to(device) > 0.5
         predicted = torch.sigmoid(output.scene_logits) > 0.5
         intersection = (predicted & target).sum(dim=1).to(torch.float32)
@@ -186,8 +211,20 @@ def _level_of_detail(
         values[f"lod{level}_iou"] = iou
         ious.append(iou)
     values["lod_detail_gain"] = ious[-1] - ious[0]
-    coarse = torch.sigmoid(model(batch, token_prefix=LOD_TOKEN_SCHEDULE[1]).scene_logits)
-    fine = torch.sigmoid(model(batch, token_prefix=LOD_TOKEN_SCHEDULE[-1]).scene_logits)
+    coarse = torch.sigmoid(
+        model(
+            batch,
+            token_prefix=LOD_TOKEN_SCHEDULE[1],
+            use_predicted_frames=use_predicted_frames,
+        ).scene_logits
+    )
+    fine = torch.sigmoid(
+        model(
+            batch,
+            token_prefix=LOD_TOKEN_SCHEDULE[-1],
+            use_predicted_frames=use_predicted_frames,
+        ).scene_logits
+    )
     values["lod_token_delta"] = float((fine - coarse).abs().mean())
     return values
 
@@ -202,6 +239,7 @@ def counterfactual_analysis(
     device: torch.device,
     target_variant: Variant | None = None,
     invariant_tolerance: float = 0.02,
+    use_predicted_frames: bool = False,
 ) -> dict[str, float]:
     """Swap each scene's relation graph for its counterfactual variant's and measure.
 
@@ -210,23 +248,26 @@ def counterfactual_analysis(
     whether it moved toward the counterfactual's true arrangement, which is the number
     that matters: a model can be sensitive without being right.
     """
+    from dataclasses import replace as dataclass_replace
+
     from datasets.whole_organ.corpus import WholeOrganScene as Scene
     from datasets.whole_organ.field import WholeOrganField
-    from dataclasses import replace as dataclass_replace
 
     counterfactual_scenes: list[Scene] = []
     for scene in whole.scenes:
-        wanted = target_variant or (
-            Variant.MIRRORED if scene.variant is not Variant.MIRRORED else Variant.NORMAL
+        # Flip the mirror bit and leave every other coordinate alone, so the
+        # counterfactual differs from the scene in exactly one respect. Step 7 swapped a
+        # whole variant label, which changed several things at once.
+        flipped = dataclass_replace(
+            scene.parameters.arrangement, mirror=not scene.parameters.arrangement.mirror
         )
-        parameters = dataclass_replace(scene.parameters, variant=wanted)
+        parameters = dataclass_replace(scene.parameters, arrangement=flipped)
         organ = WholeOrganField(parameters)
         statistics = organ.entity_statistics(np.random.default_rng(scene.seed + 101))
         edges = measure_relations(organ, statistics, np.random.default_rng(scene.seed + 103))
         counterfactual_scenes.append(
             dataclass_replace(
                 scene,
-                variant=wanted,
                 parameters=parameters,
                 centroids={k: v["centroid"].tolist() for k, v in statistics.items()},
                 extents={k: v["extent"].tolist() for k, v in statistics.items()},
@@ -242,9 +283,15 @@ def counterfactual_analysis(
     alternative = swapped.batch.to(device)
     slots = [int(slot) for slot in base.structure.visible_slots]
 
-    original = predicted_centroids(model(base).part_logits, base.scene_points, slots)
+    original = predicted_centroids(
+        model(base, use_predicted_frames=use_predicted_frames).part_logits,
+        base.scene_points,
+        slots,
+    )
     perturbed = predicted_centroids(
-        model(alternative).part_logits, alternative.scene_points, slots
+        model(alternative, use_predicted_frames=use_predicted_frames).part_logits,
+        alternative.scene_points,
+        slots,
     )
 
     displacements: list[float] = []
@@ -274,7 +321,9 @@ def counterfactual_analysis(
             to_original = float(torch.linalg.norm(after - truth_original))
             correct.append(float(to_counterfactual < to_original))
     return {
-        "counterfactual_relation_sensitivity": float(np.mean(displacements)) if displacements else 0.0,
+        "counterfactual_relation_sensitivity": float(np.mean(displacements))
+        if displacements
+        else 0.0,
         "counterfactual_correctness": float(np.mean(correct)) if correct else 0.0,
         "invariant_preservation": float(np.mean(invariant)) if invariant else 0.0,
         "counterfactual_entities": float(len(displacements)),
