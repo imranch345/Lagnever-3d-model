@@ -1,0 +1,119 @@
+{
+  "corpus_dir": "datasets/processed/step8_continuous",
+  "hierarchy": "spatial",
+  "convention": "isotropic",
+  "fitted_on": "train",
+  "metric": "Step 9's, unchanged, on global frames. The target changed; the ruler did not.",
+  "splits": {
+    "test_seen": {
+      "global": {
+        "position_error": 0.16053524955290513,
+        "scale_error": 0.13264793353080453,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.2268592163183074,
+        "frames_scored": 2300
+      },
+      "parent_relative": {
+        "position_error": 0.16364471536109132,
+        "scale_error": 0.13947134514723017,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.2333803879347064,
+        "frames_scored": 2300
+      },
+      "parent_relative_oracle": {
+        "position_error": 0.1213229343359462,
+        "scale_error": 0.1408464031862429,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.19174613592906764,
+        "frames_scored": 2300
+      },
+      "target_change_blind": -0.01936936477718217,
+      "target_change_with_true_parent": 0.24425984527489294,
+      "reproduces_step9": true
+    },
+    "test_arrangement": {
+      "global": {
+        "position_error": 0.16554135424450814,
+        "scale_error": 0.1402691695699589,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.23567593902948758,
+        "frames_scored": 2292
+      },
+      "parent_relative": {
+        "position_error": 0.16797191591907393,
+        "scale_error": 0.14800528306445443,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.24197455745130114,
+        "frames_scored": 2292
+      },
+      "parent_relative_oracle": {
+        "position_error": 0.12366173703208046,
+        "scale_error": 0.14933369859232717,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.19832858632824404,
+        "frames_scored": 2292
+      },
+      "target_change_blind": -0.01468250447544242,
+      "target_change_with_true_parent": 0.25298583186996637,
+      "reproduces_step9": true
+    },
+    "test_transform": {
+      "global": {
+        "position_error": 0.17025994529271482,
+        "scale_error": 0.16897538494127226,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.25474763776335096,
+        "frames_scored": 2306
+      },
+      "parent_relative": {
+        "position_error": 0.17245055522642463,
+        "scale_error": 0.17267880031251376,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.2587899553826815,
+        "frames_scored": 2306
+      },
+      "parent_relative_oracle": {
+        "position_error": 0.12513108886837765,
+        "scale_error": 0.17442818949761243,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.21234518361718385,
+        "frames_scored": 2306
+      },
+      "target_change_blind": -0.01286626710670949,
+      "target_change_with_true_parent": 0.265058562932994,
+      "reproduces_step9": true
+    },
+    "test_combination": {
+      "global": {
+        "position_error": 0.17498445975743582,
+        "scale_error": 0.14296494824042982,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.24646693387765073,
+        "frames_scored": 2308
+      },
+      "parent_relative": {
+        "position_error": 0.1773741679201461,
+        "scale_error": 0.1487896538437526,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.2517689948420224,
+        "frames_scored": 2308
+      },
+      "parent_relative_oracle": {
+        "position_error": 0.1514933773088634,
+        "scale_error": 0.15545870557713012,
+        "rotation_error": 0.0,
+        "composite_frame_error": 0.22922273009742844,
+        "frames_scored": 2308
+      },
+      "target_change_blind": -0.013656687948306401,
+      "target_change_with_true_parent": 0.1342466781400809,
+      "reproduces_step9": true
+    }
+  },
+  "notes": [
+    "global must reproduce Step 9 exactly; the check is asserted, not eyeballed.",
+    "parent_relative is THE Step 10 floor: blind in the parent as well as the child.",
+    "parent_relative_oracle leaks the true parent and is a diagnostic, not a floor.",
+    "rotation_error is structurally zero: the corpus rotation target is a constant identity, which Change 2 is what changes."
+  ]
+}

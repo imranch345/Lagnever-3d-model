@@ -52,6 +52,7 @@ from generation.neural.nn.geometry import (
 )
 from generation.neural.nn.graph import GraphEncoderConfig, PartitionedGraphEncoder
 from generation.neural.nn.graph_lite import GraphLiteConfig, UntypedGraphEncoder
+from generation.neural.nn.placement import HierarchicalPlacement
 from generation.neural.nn.tensors import AWRStructure, PrototypeBatch
 
 __all__ = ["PrototypeConfig", "ModelOutput", "LagnavPrototype"]
@@ -124,6 +125,27 @@ class PrototypeConfig:
     Step 8 configuration is preserved exactly and the comparison is between two settings of
     one module.
     """
+    placement_target: str = "global"
+    """Step 10, Change 1: whether the frame head predicts global or parent-relative frames.
+
+    ``parent_relative`` makes the head predict each entity in its parent's coordinates and
+    composes the result back into scene coordinates before anything downstream sees it. The
+    loss, the metrics, the decoder and the evaluation are therefore unchanged: Step 10's
+    claim is that a different *target* teaches the head something the old one could not, and
+    that is only testable if the ruler stays the same.
+    """
+
+    placement_parents: tuple[int, ...] = ()
+    """Parent slot per entity slot, -1 for a root. Empty unless ``placement_target`` is set.
+
+    Carried here rather than derived, because the model is built without the batch builder
+    and because a checkpoint should record the tree it was trained against.
+    """
+
+    placement_hierarchy: str = "spatial"
+    parent_convention: str = "isotropic"
+    """See :mod:`generation.neural.nn.transforms`; ``isotropic`` is the one that stays closed."""
+
     per_entity_geometry: bool = True
     alignment: AlignmentMode = "prototype"
     arm: str = "lagnav_structured"
@@ -362,6 +384,24 @@ class LagnavPrototype(nn.Module):
             if config.deep_frame_head
             else FrameHead(config.entity_width)
         )
+        self.placement: HierarchicalPlacement | None = None
+        if config.placement_target == "parent_relative":
+            if not config.placement_parents:
+                raise ValueError(
+                    "placement_target='parent_relative' needs placement_parents; an empty "
+                    "table would make every entity a root and the arm would silently be "
+                    "the global control."
+                )
+            self.placement = HierarchicalPlacement.from_parents(
+                config.placement_parents,
+                hierarchy=config.placement_hierarchy,
+                convention=config.parent_convention,
+            )
+        elif config.placement_target != "global":
+            raise ValueError(
+                f"Unknown placement_target {config.placement_target!r}; "
+                "expected 'global' or 'parent_relative'."
+            )
         self.tokens = GeometryTokenGenerator(config.geometry)
         self.field = OccupancyFieldDecoder(config.geometry)
         self.alignment_entity = nn.Linear(config.entity_width, config.align_width)
@@ -424,13 +464,24 @@ class LagnavPrototype(nn.Module):
         return (entity_latent * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
 
     def predict_frames(self, entity_latent: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
-        """Run the frame head, supplying scene context only when it was built for it."""
+        """Run the frame head, and return frames in **scene** coordinates either way.
+
+        Under ``parent_relative`` the head's output is read as each entity's frame in its
+        parent's coordinates and composed down the hierarchy here, so every caller keeps
+        receiving a global frame. Composing at this one point is what guarantees the Step 9
+        metric is applied unchanged; doing it in the loss would leave evaluation scoring
+        local frames against global truth and the numbers would be quietly incomparable.
+        """
         if self.config.frame_scene_context:
-            return cast(
+            predicted = cast(
                 torch.Tensor,
                 self.frame_head(entity_latent, self.scene_summary(entity_latent, present)),
             )
-        return cast(torch.Tensor, self.frame_head(entity_latent))
+        else:
+            predicted = cast(torch.Tensor, self.frame_head(entity_latent))
+        if self.placement is None:
+            return predicted
+        return self.placement.to_global(predicted, self.placement.parents_for(present))
 
     def _select_frames(
         self,
