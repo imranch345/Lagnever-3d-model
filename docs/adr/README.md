@@ -40,3 +40,18 @@ how a result must be read: which placement condition it was measured under, and 
 of the relation metric corresponds to using no relational information at all. Every one of
 the five was written because a measurement did not fit, and every one changed a conclusion
 that had already been drawn.
+
+The `ADR-STEP8-*` and `ADR-STEP10-*` series are named rather than numbered, because they
+belong to a step rather than to a running sequence.
+
+Step 8 records three architecture decisions: untyped graph attention, predicted placement as
+the headline condition, and the nested level-of-detail objective.
+
+Step 10 records four. The first two are design decisions taken before Change 1 ran — where the
+spatial parent table comes from, and why a parent contributes an isotropic scale rather than
+its full one. The third is Change 2's rotation objective: what is descended, what is reported,
+and how the weight was chosen without touching a test split. The fourth records how a result
+must be read — that a parent-relative local frame is not a portable local transform — and,
+like ADR-0018 and ADR-0019, it changes no code and exists because a measurement contradicted
+an intuition two experiments had been built on.
+
