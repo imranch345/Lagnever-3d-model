@@ -94,6 +94,23 @@ def _normalise(vector: FloatArray) -> FloatArray:
     return vector / norm if norm > 1e-9 else vector
 
 
+def _basis_from_axis(axis: FloatArray) -> FloatArray:
+    """Right-handed rows ``[b1, b2, b3]`` with ``b3`` along ``axis`` and ``b1 x b2 == b3``.
+
+    The two axes across the tube are a convention, not a measurement: a circular vessel is
+    symmetric about its own axis. Fixing them against a reference direction makes the target
+    a deterministic function of the construction instead of an arbitrary one, and the
+    reference is swapped when it is nearly parallel to the axis so the choice stays stable.
+    """
+    b3 = _normalise(np.asarray(axis, dtype=np.float64))
+    reference = (
+        np.array([1.0, 0.0, 0.0]) if abs(float(b3[0])) < 0.9 else np.array([0.0, 1.0, 0.0])
+    )
+    b1 = _normalise(reference - float(reference @ b3) * b3)
+    b2 = np.cross(b3, b1)
+    return np.stack([b1, b2, b3])
+
+
 def _surface_reach(direction: FloatArray, radii: FloatArray) -> float:
     """Distance from an ellipsoid's centre to its surface along a unit direction.
 
@@ -617,6 +634,69 @@ class WholeOrganField:
             out[entity_id] = {
                 "centroid": owned.mean(axis=0),
                 "extent": owned.std(axis=0) * 2.0,
+                "count": np.asarray([owned.shape[0]], dtype=np.float64),
+            }
+        return out
+
+    def entity_bases(self) -> dict[str, FloatArray]:
+        """Rotation rows per entity, in scene coordinates, declared from the construction.
+
+        Rows are the frame's own axes, the convention ``frame_rotation`` and the decoder
+        expect: the decoder computes ``local = (p - t) @ R / s``, so row *i* must be the
+        axis along which component *i* is measured.
+
+        The rotation is **declared** from how the generator builds each entity, while the
+        centroid and the extents stay measured. Principal axes would have been the
+        alternative, and are rejected: a chamber is nearly an ellipsoid of revolution, so
+        its second and third principal axes are decided by sampling noise, and the target
+        would be a coin flip no model could learn.
+
+        An annulus or a tube has one distinguished axis — the disc's normal, the vessel's
+        direction — and that becomes the frame's third row. The remaining two are completed
+        deterministically, because a circular tube is symmetric about its axis and nothing
+        in the geometry distinguishes one spin from another. A cavity, a septum or a shell
+        has no distinguished axis at all and takes the organ's own orientation, which is
+        where the arrangement's yaw, pitch and roll enter.
+        """
+        local: dict[str, FloatArray] = {
+            entity_id: np.eye(3, dtype=np.float64) for entity_id in self.entity_ids
+        }
+        for annulus in self.annuli:
+            local[annulus.entity_id] = _basis_from_axis(annulus.axis)
+        for tube in self.tubes:
+            local[tube.entity_id] = _basis_from_axis(tube.end - tube.start)
+        # Organ-local rows into scene coordinates, the same map the sampled points take.
+        return {
+            entity_id: np.asarray(basis @ self.rotation.T, dtype=np.float64)
+            for entity_id, basis in local.items()
+        }
+
+    def oriented_statistics(
+        self, rng: np.random.Generator, count: int = 4000
+    ) -> dict[str, dict[str, FloatArray]]:
+        """:meth:`entity_statistics` plus each entity's rotation and its extent in that frame.
+
+        The proposals, the centroids and the world-axis extents are the same draws
+        :meth:`entity_statistics` makes from a generator in the same state, so a scene
+        measured this way keeps the centroids — and therefore the relationship graph — of the
+        same scene measured without rotations. Only the extent's basis is new, and it has to
+        be: an oriented frame whose extents were measured on the world axes would describe a
+        box that is not the one it names.
+        """
+        bases = self.entity_bases()
+        out: dict[str, dict[str, FloatArray]] = {}
+        for entity_id, slot in self.slot_of.items():
+            proposals = self.proposal_points(entity_id, count, rng)
+            owned = proposals[self.ownership(proposals) == slot]
+            if owned.shape[0] < 8:
+                continue
+            centroid = owned.mean(axis=0)
+            basis = bases[entity_id]
+            out[entity_id] = {
+                "centroid": centroid,
+                "extent": owned.std(axis=0) * 2.0,
+                "frame_extent": ((owned - centroid) @ basis.T).std(axis=0) * 2.0,
+                "rotation": basis[:2].reshape(-1),
                 "count": np.asarray([owned.shape[0]], dtype=np.float64),
             }
         return out

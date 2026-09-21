@@ -126,7 +126,10 @@ def measure_relations(
         edges.append(MeasuredEdge(subject, positive if first > second else negative, obj))
 
     clouds: dict[str, FloatArray] = {}
-    for entity_id in {name for pair in ADJACENCY_PAIRS for name in pair}:
+    # Sorted, not set order. Each draw consumes the shared generator, so iterating a set of
+    # strings made the clouds depend on hash randomisation and the adjacency edges therefore
+    # depend on which process generated the corpus. Sorting makes a corpus reproducible.
+    for entity_id in sorted({name for pair in ADJACENCY_PAIRS for name in pair}):
         if entity_id not in statistics:
             continue
         points, owned = field.entity_points(entity_id, cloud_points, rng)
