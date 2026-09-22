@@ -98,25 +98,92 @@ weight 1.0.
 ## 5. What it does not establish
 
 * **Nothing confirmatory.** One seed, two arms, validation only. The confirmatory statement
-  requires the full matrix at the single frozen weight, which is what runs next.
+  required the full matrix at the single frozen weight; §6 is that matrix, and it delivered a
+  smaller margin than this screening suggested — 1.27° rather than 2.55°.
 * **That 3.0 is optimal.** It is the lowest weight indistinguishable from the best of four
   screened values under a rule fixed in advance. A finer sweep was not run and is not needed
   to answer the question this study asked.
 * **That the remaining 21° is irreducible.** The graph-conditional lookup reaches 11.57° on
   `test_seen`, so a model that reads the graph should in principle do better than A3 does
-  here. The gap between 20.96° and that bound is unexplained and is the next open question.
+  here. That gap survives the confirmatory matrix and is the next open question.
 * **Anything about the parent-relative cells at this weight.** `T4_rigid` and `T1_spatial`
   were screened at 0.33 only. More rotation pressure might change how much a parent's
   orientation is worth, and that has not been tested.
 
 ---
 
-## 6. What runs next
+## 6. Confirmed on the test splits
 
-A confirmatory matrix at the single frozen weight of 3.0: `T0_global`, five arms, three seeds,
-scored on all four test splits — the first time a test split is read at this weight. Change 2's
-runs at 0.33 stay exactly as they are, in their own directory, and remain reproducible: the
-weight is now an explicit run parameter whose default is still 0.33.
+The confirmatory matrix ran at the single frozen weight of 3.0: `T0_global`, five arms, three
+seeds, scored on all four test splits. Artifacts in `experiments/runs/step10-change2-w3/`.
+
+`test_seen`, rotation floor 22.65°, position floor 0.1605:
+
+| arm | rotation at 3.0 | at 0.33 | margin | position | beats rotation floor |
+| --- | ---: | ---: | ---: | ---: | --- |
+| A1 | 22.74 ± 0.01 | 23.85 | −0.08 | 0.1674 | no |
+| A1M | 22.73 ± 0.01 | 23.60 | −0.08 | 0.1672 | no |
+| A3Lite | 22.64 ± 0.04 | 23.74 | +0.01 | 0.1597 | at the floor |
+| A3L | 22.69 ± 0.01 | 23.61 | −0.04 | 0.1642 | no |
+| **A3** | **21.38 ± 1.03** | 23.75 | **+1.27** | **0.1561** | **yes** |
+
+`test_transform`, the extrapolation split, floor 35.95°: A3 reaches 35.51 (+0.45), A3Lite
+35.79 (+0.16), the rest at or below the floor.
+
+### What this confirms
+
+**Rotation is learnable above the floor, and only by the full typed graph.** A3 clears it by
+1.27° on `test_seen` and 0.45° on `test_transform`, on held-out data, at a weight chosen
+without ever reading a test split. Change 2's rotation conclusion is now superseded by a
+confirmatory result rather than a screening one.
+
+**The weight helped every arm; the architecture decided who could use it.** All five improved
+by about 1.1° when the rotation term went from 7% to 41% of the frame loss. Four of them
+stopped at the floor. Capacity is not the discriminator either — A1M has 3.1M parameters and
+lands exactly where A1's 0.56M does. Only the arm that reads the typed relational graph turns
+the extra pressure into a margin, which is what the graph-conditional bound predicted: the
+scene-specific rotation lives in the relationship graph.
+
+**Position was not the price.** A3 holds 0.1561 against a 0.1605 floor, better than its own
+0.1563 at weight 0.33. Scale is unchanged. The trade-off the 2% allowance existed to catch
+never materialised on test data either.
+
+### What weakens it, and must be read with it
+
+**A3's seed spread is 1.03°, twenty times any other arm's**, from a bimodal result: two seeds
+at 20.78 and 20.79, one at 22.57. All three are below the floor, so the sign is consistent,
+but one clears it by only 0.08°. A single seed would have given either "a decisive 1.9° margin"
+or "at the floor", and both would have been wrong.
+
+**The margin is half what validation suggested** — 1.27° against 2.55°. Screening on one seed
+overstated it, which is the expected direction for a value selected on one split.
+
+**The instability is itself a finding.** Raising the rotation weight from 7% to 41% makes the
+full typed graph better on average and much less repeatable. Whether that is an optimisation
+problem, a capacity conflict between the objectives, or something about this corpus is not
+answered here.
+
+**A3's 21.38° is still far above what a lookup can do.** The graph-conditional bound is 11.57°
+on `test_seen`. The model beats a lookup keyed on identity alone and remains well short of one
+keyed on identity and graph — the information is there, and most of it is still unused.
+
+---
+
+## 7. What runs next
+
+Three things, in the order I would do them:
+
+1. **Seeds, for A3 at this weight.** The 1.03° spread is the weakest part of the result. More
+   seeds would say whether 22.57 is a rare basin or a third of the distribution.
+2. **The gap to 11.57°.** A model that reads the graph should approach a lookup that reads the
+   graph. It does not. That gap is now the most informative open question about the
+   architecture, and it is a question Change 2 could not have asked.
+3. **The parent-relative cells at this weight.** `T4_rigid` and `T1_spatial` were only ever run
+   at 0.33. More rotation pressure might change what a parent's orientation is worth, and
+   ADR-STEP10-004's portability finding was measured under the old weight.
+
+Change 2's runs at 0.33 are untouched in their own directory and remain reproducible: the
+rotation weight is an explicit run parameter whose default is still 0.33.
 
 Reproduce:
 
@@ -124,7 +191,8 @@ Reproduce:
 python -m experiments.step10.weight_study --arms A3
 python -m experiments.step10.weight_study --arms A1
 python -m experiments.step10.weight_study --decide-only
+python -m experiments.step10.run_change2 --seeds 0 --cells T0_global --rotation-weight 3.0 \
+    --out experiments/runs/step10-change2-w3
 ```
 
-Artifacts: `experiments/runs/step10-weight-study/` — `runs/*.json`, `weight_study.json`,
-`logs/`, and `RESUME.md`.
+Artifacts: `experiments/runs/step10-weight-study/` and `experiments/runs/step10-change2-w3/`.

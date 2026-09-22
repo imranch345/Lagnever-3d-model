@@ -598,6 +598,11 @@ fail hardest when a transformation pair is held out — and rotation has not cha
 > architecture. At λ=3.0 instead of 0.33, A3 scores 20.96° against a validation floor of
 > 23.51° — 2.55° *below* it — with position unchanged and still under its own floor.
 >
+> **Confirmed on the test splits since.** At λ=3.0, A3 scores 21.38° ± 1.03 against the
+> 22.65° floor on `test_seen` — 1.27° below it — and 35.51° against 35.95° on
+> `test_transform`, with position better than its own λ=0.33 result. The other four arms
+> improve by about 1.1° and stop at the floor.
+>
 > Everything measured below stands **as measured at λ=0.33**, and the §5 limitation names
 > exactly why that mattered. What no longer follows is any statement about the architecture's
 > capacity to learn rotation. See `docs/STEP_10_ROTATION_WEIGHT_STUDY.md`.
@@ -993,7 +998,8 @@ Integrity: PASS
 Leakage: PASS
 Rotation target: VALID
 Rotation learning: NOT SUPPORTED at lambda = 0.33
-                   SUPPORTED at lambda = 3.0 (validation screening; see the weight study)
+                   SUPPORTED at lambda = 3.0, A3 only, confirmed on the test splits
+                   (+1.27 deg on test_seen, seed spread 1.03; see the weight study)
 Position preservation: SUPPORTED
 Scale behavior: SUPPORTED
 T4_rigid control: COMPLETE
