@@ -160,6 +160,24 @@ under-weighting is not ruled out; that is the recommended next study.
 
 The full account is in `docs/STEP_10_CHANGE2_TRAINING_REPORT.md`.
 
+## The rotation weight study, and what it overturned
+
+| file | what it does |
+| --- | --- |
+| `graph_conditional_floor.py` | bounds what the inputs can give: a lookup on entity identity **and relationship graph** halves the rotation error |
+| `weight_study.py` | screens the rotation weight on validation only, under a rule fixed in advance |
+
+**Outcome (2026-09-22): the weight was the binding constraint.** At 0.33 — Change 2's
+calibrated value, 7% of the frame loss — A3 sat 0.96° above the rotation floor. At 3.0 it sits
+2.55° below it, with position unchanged and still under its own floor. A1, which has no
+relational graph, never clears the floor: the scene-specific rotation lives in the graph, so
+only an arm that reads it can spend the extra weight.
+
+Change 2's rotation conclusion is amended accordingly, and its §10 says so. The confirmatory
+matrix at the frozen weight of 3.0 runs in `experiments/runs/step10-change2-w3/`.
+
+Full account: `docs/STEP_10_ROTATION_WEIGHT_STUDY.md`.
+
 ## Data
 
 Synthetic research data. Not anatomy, not validated, not clinical.

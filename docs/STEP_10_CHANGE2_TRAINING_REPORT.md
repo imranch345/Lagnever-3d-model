@@ -593,6 +593,16 @@ fail hardest when a transformation pair is held out — and rotation has not cha
 
 ## 10. Rotation results
 
+> **AMENDED 2026-09-22 — this section's conclusion is superseded.** A validation-only weight
+> study afterwards showed the rotation term's weight was the binding constraint, not the
+> architecture. At λ=3.0 instead of 0.33, A3 scores 20.96° against a validation floor of
+> 23.51° — 2.55° *below* it — with position unchanged and still under its own floor.
+>
+> Everything measured below stands **as measured at λ=0.33**, and the §5 limitation names
+> exactly why that mattered. What no longer follows is any statement about the architecture's
+> capacity to learn rotation. See `docs/STEP_10_ROTATION_WEIGHT_STUDY.md`.
+
+
 **No arm, in any cell, on any split, beat the rotation floor.** That is the central result.
 
 | split | best arm and cell | rotation | floor | margin |
@@ -800,9 +810,11 @@ of it says the Lagnav 3D architecture is solved, and none of it is a claim about
 
 ### Established
 
-1. **Rotation was not learned above the identity-lookup floor.** No arm, no cell, no split, on
-   mean, median or any threshold. The best margin anywhere is −0.07°, on the split whose floor
-   is highest.
+1. **Rotation was not learned above the identity-lookup floor _at this weight_.** No arm, no
+   cell, no split, on mean, median or any threshold; the best margin anywhere is −0.07°, on
+   the split whose floor is highest. **Superseded as a general claim**: at λ=3.0 the same
+   architecture clears the floor by 2.55° on validation. The qualifier "at this weight" was
+   not in the original text and is the correction.
 2. **The failure is consistent, not noisy.** Rotation's across-seed spread is 0.05–0.36°
    against gaps to the floor of 0.6–2.1°.
 3. **Learning rotation cost nothing in position.** A3's margin over the position floor is
@@ -824,8 +836,9 @@ of it says the Lagnav 3D architecture is solved, and none of it is a claim about
 
 ### Unsupported
 
-* That the architecture **cannot** learn rotation. The rotation term is 7% of the frame loss
-  (§5); under-weighting and architectural incapacity are not separated by this experiment.
+* ~~That the architecture **cannot** learn rotation.~~ **Resolved against this report.** The
+  rotation term was 7% of the frame loss (§5), and raising it to 19% or more clears the floor.
+  Under-weighting was the explanation; this report was right to refuse the stronger claim.
 * That the result would survive a different rotation weight, a longer schedule, or a
   rotation-only objective. None was run, because each would have meant choosing against test
   results.
@@ -908,6 +921,10 @@ Produced by `experiments/step10/graph_conditional_floor.py`; artifact
 
 ## 21. Next step
 
+**Done, and it changed the conclusion.** The study ran; see
+`docs/STEP_10_ROTATION_WEIGHT_STUDY.md` and the amendment at §10. What follows is the
+recommendation as it was written before it ran:
+
 **Recommended: a rotation-weight study on `train` and `validation` only, before any further
 architectural work** — and §20a makes it considerably more urgent, because it shows the
 headroom the study would be chasing is real and large. This experiment cannot distinguish "the architecture does not learn
@@ -960,4 +977,37 @@ Artifacts in `experiments/runs/step10-change2/`: `runs/*.json` (one per run),
 `rotation_weight_calibration.json`, `rotated_placement_floor.json`, `rotation_audit.json`,
 `corpus_validation.json`, `CORPUS_FROZEN.sha256`, `logs/`.
 
-Code state: commit `66606a0` plus this pass's uncommitted changes; nothing has been committed.
+Code state: committed on branch `step10-placement-and-rotation`. The corpus manifest records
+`66606a0` as its `generator_commit`, which is the commit the corpus was generated from.
+
+---
+
+## Status at completion
+
+```text
+CHANGE 2 STATUS
+----------------
+Corpus: FROZEN
+Training: COMPLETE
+Integrity: PASS
+Leakage: PASS
+Rotation target: VALID
+Rotation learning: NOT SUPPORTED at lambda = 0.33
+                   SUPPORTED at lambda = 3.0 (validation screening; see the weight study)
+Position preservation: SUPPORTED
+Scale behavior: SUPPORTED
+T4_rigid control: COMPLETE
+
+Rotation floor (test splits, lambda = 0.33 runs):
+test_seen = 22.65 deg
+test_arrangement = 22.54 deg
+test_transform = 35.95 deg
+test_combination = 26.10 deg
+
+Change 3:
+NOT STARTED
+```
+
+The two rotation-learning lines are the amendment of 2026-09-22. The first is what this
+experiment measured; the second is what the weight study found afterwards, on validation, and
+it is not yet a confirmatory result — the matrix at the frozen weight is what makes it one.

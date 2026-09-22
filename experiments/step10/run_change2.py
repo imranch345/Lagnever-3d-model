@@ -71,13 +71,26 @@ from experiments.step10.rotation_metrics import rotation_report
 from training.manifest import environment_report, git_commit
 from training.step10 import Step10Trainer, default_config, with_variant
 
-__all__ = ["ARMS", "CELLS", "ROTATION_LOSS_WEIGHT", "assemble", "main", "run_change2"]
+__all__ = [
+    "ARMS",
+    "CELLS",
+    "ROTATION_LOSS_WEIGHT",
+    "SCREENED_ROTATION_WEIGHT",
+    "assemble",
+    "main",
+    "run_change2",
+]
 
 ARMS: tuple[str, ...] = ("A1", "A1M", "A3Lite", "A3L", "A3")
 
-#: Frozen by the train-only calibration in ``calibrate_rotation_weight.py``. A run whose
-#: manifest disagrees with this is a protocol violation and the runner refuses to start.
+#: Change 2's weight, from the train-only calibration in ``calibrate_rotation_weight.py``.
+#: The default, so the confirmatory runs already on record reproduce exactly.
 ROTATION_LOSS_WEIGHT = 0.33
+
+#: Chosen by the validation-only screening in ``weight_study.py`` after Change 2 found the
+#: rotation term was the binding constraint at 0.33. Pass it explicitly; it writes to its own
+#: output directory, because a run at a different weight is a different experiment.
+SCREENED_ROTATION_WEIGHT = 3.0
 ROTATION_OBJECTIVE = "chordal"
 
 #: name -> (placement target, hierarchy, parent convention, role, what it tests)
@@ -116,7 +129,13 @@ CHECKSUMS = Path("experiments/runs/step10-change2/CORPUS_FROZEN.sha256")
 
 
 def _protocol(
-    *, steps: int, batch_size: int, device: str, splits: Sequence[str], corpus_id: str
+    *,
+    steps: int,
+    batch_size: int,
+    device: str,
+    splits: Sequence[str],
+    corpus_id: str,
+    rotation_weight: float,
 ) -> dict[str, Any]:
     """What must match for a saved run to be reused rather than retrained."""
     return {
@@ -127,7 +146,7 @@ def _protocol(
         "corpus_id": corpus_id,
         "torch_threads": torch.get_num_threads(),
         "rotation_objective": ROTATION_OBJECTIVE,
-        "rotation_loss_weight": ROTATION_LOSS_WEIGHT,
+        "rotation_loss_weight": rotation_weight,
     }
 
 
@@ -167,6 +186,7 @@ def run_change2(
     splits: Sequence[str],
     output_dir: Path,
     min_free_gib: float = 2.0,
+    rotation_weight: float = ROTATION_LOSS_WEIGHT,
 ) -> list[Path]:
     """Train each cell of each arm at each seed; write one run file per finished run."""
     frozen = _corpus_unchanged()
@@ -183,6 +203,7 @@ def run_change2(
         device=device,
         splits=splits,
         corpus_id=manifest.corpus_id,
+        rotation_weight=rotation_weight,
     )
     train = load_step8_split(corpus_dir, "train")
     validation = load_step8_split(corpus_dir, "validation")
@@ -205,7 +226,7 @@ def run_change2(
                     config,
                     parent_convention=convention,
                     rotation_objective=ROTATION_OBJECTIVE,  # type: ignore[arg-type]
-                    rotation_loss_weight=ROTATION_LOSS_WEIGHT,
+                    rotation_loss_weight=rotation_weight,
                     steps=steps,
                     batch_size=batch_size,
                     device=device,
@@ -246,8 +267,10 @@ def run_change2(
                         "data_label": manifest.data_label,
                     },
                 )
-                if trainer.config.rotation_loss_weight != ROTATION_LOSS_WEIGHT:
-                    raise SystemExit("the run's rotation weight is not the frozen one")
+                if trainer.config.rotation_loss_weight != rotation_weight:
+                    raise SystemExit(
+                        "the run's rotation weight is not the one this experiment declared"
+                    )
                 run = trainer.fit(checkpoint_dir=output_dir / "checkpoints")
 
                 started = time.time()
@@ -324,7 +347,7 @@ def run_change2(
                     "hierarchy": hierarchy,
                     "parent_convention": convention,
                     "rotation_objective": ROTATION_OBJECTIVE,
-                    "rotation_loss_weight": ROTATION_LOSS_WEIGHT,
+                    "rotation_loss_weight": rotation_weight,
                     "parented_entities": sum(
                         1 for slot in trainer.config.placement_parents if slot >= 0
                     ),
@@ -527,7 +550,7 @@ def assemble(output_dir: Path, *, corpus_dir: Path) -> dict[str, Any]:
         "protocol": protocol,
         "objective": {
             "rotation_objective": ROTATION_OBJECTIVE,
-            "rotation_loss_weight": ROTATION_LOSS_WEIGHT,
+            "rotation_loss_weight": protocol["rotation_loss_weight"],
             "scale_weight": 0.5,
             "translation_weight": 1.0,
             "frame_weight": 2.0,
@@ -583,6 +606,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--splits", nargs="+", default=list(TEST_SPLITS))
     parser.add_argument("--out", type=Path, default=Path("experiments/runs/step10-change2"))
     parser.add_argument("--min-free-gib", type=float, default=2.0)
+    parser.add_argument(
+        "--rotation-weight",
+        type=float,
+        default=ROTATION_LOSS_WEIGHT,
+        help=(
+            "the rotation term's coefficient. Defaults to Change 2's calibrated 0.33; the "
+            f"validation screening later chose {SCREENED_ROTATION_WEIGHT}. A different "
+            "weight is a different experiment and needs its own --out."
+        ),
+    )
     parser.add_argument("--assemble-only", action="store_true")
     args = parser.parse_args(argv)
 
@@ -601,6 +634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             splits=args.splits,
             output_dir=args.out,
             min_free_gib=args.min_free_gib,
+            rotation_weight=args.rotation_weight,
         )
     report = assemble(args.out, corpus_dir=args.corpus)
     print(json.dumps(report["objective"], indent=2))
