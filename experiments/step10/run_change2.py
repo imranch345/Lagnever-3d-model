@@ -68,6 +68,7 @@ from experiments.step9.frame_report import decompose, floor_gap
 from experiments.step10.depth_analysis import depth_analysis
 from experiments.step10.placement_floor import placement_floor
 from experiments.step10.rotation_metrics import rotation_report
+from generation.neural.nn.init_alignment import align_shared_initialisation
 from training.manifest import environment_report, git_commit
 from training.step10 import Step10Trainer, default_config, with_variant
 
@@ -137,6 +138,8 @@ def _protocol(
     corpus_id: str,
     rotation_weight: float,
     relation_values: bool,
+    graph_recurrence: int,
+    frame_scene_context: bool,
 ) -> dict[str, Any]:
     """What must match for a saved run to be reused rather than retrained."""
     return {
@@ -149,6 +152,8 @@ def _protocol(
         "rotation_objective": ROTATION_OBJECTIVE,
         "rotation_loss_weight": rotation_weight,
         "relation_values": relation_values,
+        "graph_recurrence": graph_recurrence,
+        "frame_scene_context": frame_scene_context,
     }
 
 
@@ -190,6 +195,8 @@ def run_change2(
     min_free_gib: float = 2.0,
     rotation_weight: float = ROTATION_LOSS_WEIGHT,
     relation_values: bool = False,
+    graph_recurrence: int = 1,
+    frame_scene_context: bool = False,
 ) -> list[Path]:
     """Train each cell of each arm at each seed; write one run file per finished run."""
     frozen = _corpus_unchanged()
@@ -208,6 +215,8 @@ def run_change2(
         corpus_id=manifest.corpus_id,
         rotation_weight=rotation_weight,
         relation_values=relation_values,
+        graph_recurrence=graph_recurrence,
+        frame_scene_context=frame_scene_context,
     )
     train = load_step8_split(corpus_dir, "train")
     validation = load_step8_split(corpus_dir, "validation")
@@ -232,6 +241,8 @@ def run_change2(
                     rotation_objective=ROTATION_OBJECTIVE,  # type: ignore[arg-type]
                     rotation_loss_weight=rotation_weight,
                     relation_values=relation_values,
+                    graph_recurrence=graph_recurrence,
+                    frame_scene_context=frame_scene_context,
                     steps=steps,
                     batch_size=batch_size,
                     device=device,
@@ -272,6 +283,29 @@ def run_change2(
                         "data_label": manifest.data_label,
                     },
                 )
+                # Step 13. A treatment that reshapes a weight cannot be made to share the
+                # control's RNG stream, so both are built at this seed and every tensor they
+                # have in common is taken from the control. Without this, enabling the frame
+                # head's scene context shifts 37 shared parameters including the geometry
+                # tokeniser, and the arm would differ by seed as well as by architecture.
+                alignment: dict[str, Any] | None = None
+                if graph_recurrence != 1 or frame_scene_context:
+                    reference = Step10Trainer(
+                        replace(config, graph_recurrence=1, frame_scene_context=False),
+                        ontology,
+                        domain,
+                        train,
+                        validation,
+                    )
+                    alignment = align_shared_initialisation(
+                        trainer.model, reference.model
+                    ).to_dict()
+                    print(
+                        f"[change2]   aligned {alignment['tensors_copied_from_control']} tensors "
+                        f"to the control; intended differences: "
+                        f"{alignment['intended_differences'] or 'none'}",
+                        flush=True,
+                    )
                 if trainer.config.rotation_loss_weight != rotation_weight:
                     raise SystemExit(
                         "the run's rotation weight is not the one this experiment declared"
@@ -354,6 +388,8 @@ def run_change2(
                     "rotation_objective": ROTATION_OBJECTIVE,
                     "rotation_loss_weight": rotation_weight,
                     "relation_values": relation_values,
+                    "graph_recurrence": graph_recurrence,
+                    "frame_scene_context": frame_scene_context,
                     "parented_entities": sum(
                         1 for slot in trainer.config.placement_parents if slot >= 0
                     ),
@@ -365,6 +401,7 @@ def run_change2(
                         "eval_seconds": round(eval_seconds, 2),
                         "depth_seconds": round(depth_seconds, 2),
                     },
+                    "initialisation_alignment": alignment,
                     "integrity": {"train": trainer.integrity, "splits": split_integrity},
                     "splits": record_splits,
                     "rotation": rotation,
@@ -632,6 +669,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--out."
         ),
     )
+    parser.add_argument(
+        "--graph-recurrence",
+        type=int,
+        default=1,
+        help=(
+            "Step 13 H2: repeats of the graph layer stack, sharing weights. 2 doubles the "
+            "propagation hops from 4 to 8 and adds no parameters. A different value is a "
+            "different experiment and needs its own --out."
+        ),
+    )
+    parser.add_argument(
+        "--frame-scene-context",
+        action="store_true",
+        help=(
+            "Step 13 H6: give the frame head a masked mean of the present entities' latents. "
+            "This is Step 9's P4 pathway, unsupported there on translation and never measured "
+            "on rotation because Step 9 had no rotations."
+        ),
+    )
     parser.add_argument("--assemble-only", action="store_true")
     args = parser.parse_args(argv)
 
@@ -652,6 +708,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             min_free_gib=args.min_free_gib,
             rotation_weight=args.rotation_weight,
             relation_values=args.relation_values,
+            graph_recurrence=args.graph_recurrence,
+            frame_scene_context=args.frame_scene_context,
         )
     report = assemble(args.out, corpus_dir=args.corpus)
     print(json.dumps(report["objective"], indent=2))

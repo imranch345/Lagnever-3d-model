@@ -96,6 +96,14 @@ class Step10Config(Step9Config):
     12 adds. Off reproduces every earlier run exactly.
     """
 
+    graph_recurrence: int = 1
+    """Step 13, H2: repeats of the graph layer stack, sharing every weight.
+
+    ``layers`` buys propagation depth by adding parameters; this buys it without any, so a
+    depth result is not also a capacity result. 4 layers reach roughly four neighbours, so 2
+    reaches eight. 1 reproduces every earlier run exactly.
+    """
+
     rotation_objective: RotationObjective = "step8_6d_l1"
     """How rotation is penalised.
 
@@ -150,6 +158,7 @@ class Step10Config(Step9Config):
         payload.update(
             {
                 "relation_values": self.relation_values,
+                "graph_recurrence": self.graph_recurrence,
                 "placement_target": self.placement_target,
                 "placement_parents": self.placement_parents,
                 "placement_hierarchy": self.placement_hierarchy,
@@ -163,6 +172,8 @@ class Step10Config(Step9Config):
         payload = super().to_dict()
         payload["step10"] = {
             "relation_values": self.relation_values,
+            "graph_recurrence": self.graph_recurrence,
+            "frame_scene_context": self.frame_scene_context,
             "rotation_objective": self.rotation_objective,
             "rotation_loss_weight": self.rotation_loss_weight,
             "placement_target": self.placement_target,

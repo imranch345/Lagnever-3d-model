@@ -48,6 +48,16 @@ class GraphEncoderConfig:
     a neighbour contributes, which is the smallest change that lets a relation say something
     rather than only say it louder.
     """
+    recurrence: int = 1
+    """How many times the layer stack runs, with the **same** weights each time.
+
+    Step 13, H2. ``layers`` buys depth by adding parameters; this buys propagation hops
+    without any. Four layers reach roughly four graph neighbours, so ``recurrence=2`` reaches
+    eight while leaving the parameter count and every weight's initialisation untouched, which
+    is the only way to vary propagation depth without also varying capacity. A3's seed spread
+    is about the size of the effects being measured, so a +41% capacity change bundled into a
+    depth test would not have been interpretable either way.
+    """
     mlp_ratio: float = 4.0
     dropout: float = 0.0
 
@@ -359,6 +369,11 @@ class PartitionedGraphEncoder(nn.Module):
             relation=routing.relation.repeat(batch_size),
         )
 
+    @property
+    def propagation_steps(self) -> int:
+        """Message-passing hops a signal can travel: layers times repeats of the stack."""
+        return self.config.layers * self.config.recurrence
+
     def forward(self, latent: torch.Tensor, structure: AWRStructure) -> torch.Tensor:
         """Contextualise entity latents, leaving the identity slice untouched."""
         batch_size = latent.shape[0]
@@ -367,7 +382,8 @@ class PartitionedGraphEncoder(nn.Module):
         routing = self.build_routing(structure, batch_size)
         weight = None if self.relation_value is None else self.relation_value.weight
         current = latent
-        for layer in self.layers:
-            current = layer(current, mask, bias, routing, weight)
+        for _ in range(self.config.recurrence):
+            for layer in self.layers:
+                current = layer(current, mask, bias, routing, weight)
         identity_width = self.config.identity_width
         return torch.cat([latent[..., :identity_width], current[..., identity_width:]], dim=-1)

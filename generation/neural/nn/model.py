@@ -74,6 +74,8 @@ class PrototypeConfig:
     scene_width: int = 256
     identity_width: int = 96
     graph_layers: int = 4
+    graph_recurrence: int = 1
+    """Step 13, H2: repeats of the graph layer stack, sharing weights. 1 is every prior step."""
     heads: HeadAllocation = field(default_factory=HeadAllocation.default)
     geometry: GeometryConfig = field(default_factory=GeometryConfig)
     align_width: int = 256
@@ -362,6 +364,7 @@ class LagnavPrototype(nn.Module):
                     width=config.entity_width,
                     identity_width=config.identity_width,
                     layers=config.graph_layers,
+                    recurrence=config.graph_recurrence,
                     heads=heads,
                     relation_vocabulary=config.relation_vocabulary,
                     relation_values=config.relation_values,
