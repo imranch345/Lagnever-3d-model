@@ -39,6 +39,15 @@ class GraphEncoderConfig:
     heads: HeadAllocation = HeadAllocation({HeadRole.GLOBAL: 1})
     relation_vocabulary: int = 18
     relation_width: int = 64
+    relation_values: bool = False
+    """Whether a relation contributes a message, not only an attention weight.
+
+    Off reproduces every result up to Step 11, where the measurement was that relation type
+    moved the answer by 0.0003 degrees because its only channel was a scalar bias that trained
+    to 0.55% of the attention logit scale. On, each relation also adds a learned vector to what
+    a neighbour contributes, which is the smallest change that lets a relation say something
+    rather than only say it louder.
+    """
     mlp_ratio: float = 4.0
     dropout: float = 0.0
 
@@ -51,6 +60,22 @@ class GraphEncoderConfig:
     def head_width(self) -> int:
         """Width of one attention head."""
         return self.width // self.heads.total
+
+
+@dataclass(frozen=True, slots=True)
+class _RelationRouting:
+    """Where each live relation sits, precomputed once and reused by every layer.
+
+    The same index lists :meth:`PartitionedGraphEncoder.build_bias` walks, kept so the value
+    term is routed exactly as the bias term is: per head, respecting each head's graph scope,
+    with the reverse direction carrying the inverse relation.
+    """
+
+    scene: torch.Tensor
+    head: torch.Tensor
+    query: torch.Tensor
+    key: torch.Tensor
+    relation: torch.Tensor
 
 
 class _GraphAttentionLayer(nn.Module):
@@ -76,7 +101,12 @@ class _GraphAttentionLayer(nn.Module):
         )
 
     def forward(
-        self, latent: torch.Tensor, mask: torch.Tensor, bias: torch.Tensor
+        self,
+        latent: torch.Tensor,
+        mask: torch.Tensor,
+        bias: torch.Tensor,
+        routing: _RelationRouting | None = None,
+        relation_value: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Update the context slice of ``latent``."""
         batch, entities, _ = latent.shape
@@ -94,6 +124,22 @@ class _GraphAttentionLayer(nn.Module):
         weights = torch.softmax(logits, dim=-1)
         weights = torch.nan_to_num(weights, nan=0.0)
         attended = torch.einsum("bhij,bhjd->bhid", weights, v)
+        if routing is not None and relation_value is not None:
+            # sum_j alpha_ij r_ij, computed as attention mass per relation times the relation's
+            # vector. Accumulating the mass first keeps this the size of [B, H, N, R] instead
+            # of a value for every pair.
+            vocabulary = relation_value.shape[0]
+            mass = torch.zeros(
+                (batch, heads, entities, vocabulary), device=latent.device, dtype=weights.dtype
+            )
+            mass.index_put_(
+                (routing.scene, routing.head, routing.query, routing.relation),
+                weights[routing.scene, routing.head, routing.query, routing.key],
+                accumulate=True,
+            )
+            attended = attended + torch.einsum(
+                "bhir,rhd->bhid", mass, relation_value.view(vocabulary, heads, head_width)
+            )
         attended = attended.transpose(1, 2).reshape(batch, entities, self.config.width)
 
         identity_width = self.config.identity_width
@@ -119,6 +165,16 @@ class PartitionedGraphEncoder(nn.Module):
         self.register_buffer("inverse_relations", inverse_relations, persistent=False)
         self.relation_bias = nn.Embedding(config.relation_vocabulary, config.heads.total)
         nn.init.zeros_(self.relation_bias.weight)
+        # Zero-initialised, and created inside a forked generator, so switching the flag on
+        # leaves every other parameter bit-identical. Without the fork the extra embedding
+        # would consume random numbers and shift the whole initialisation stream, and the
+        # control would differ from the treatment by its seed as well as by the new channel —
+        # indistinguishable from the effect, since A3's seed spread is about a degree.
+        self.relation_value: nn.Embedding | None = None
+        if config.relation_values:
+            with torch.random.fork_rng(devices=[]):
+                self.relation_value = nn.Embedding(config.relation_vocabulary, config.width)
+            nn.init.zeros_(self.relation_value.weight)
         self.layers = nn.ModuleList(
             [_GraphAttentionLayer(config) for _ in range(config.layers)]
         )
@@ -230,13 +286,88 @@ class PartitionedGraphEncoder(nn.Module):
                 )
         return bias if scenes == batch_size else bias.expand(batch_size, -1, -1, -1)
 
+    def build_routing(
+        self, structure: AWRStructure, batch_size: int
+    ) -> _RelationRouting | None:
+        """Index lists placing each live relation on the pairs its head may see.
+
+        Built once and reused by every layer, and deliberately the same walk
+        :meth:`build_bias` performs: a head only carries edges of its own graph kind, and the
+        reverse direction carries the inverse relation where one exists. If the value term were
+        routed differently from the bias term the two would disagree about what a relation is.
+        """
+        if self.relation_value is None:
+            return None
+        batched = structure.edge_mask.dim() == 2
+        edge_mask = structure.edge_mask if batched else structure.edge_mask.unsqueeze(0)
+        if not bool(edge_mask.any()):
+            return None
+        edge_source = structure.edge_source if batched else structure.edge_source.unsqueeze(0)
+        edge_target = structure.edge_target if batched else structure.edge_target.unsqueeze(0)
+        edge_relation = structure.edge_relation if batched else structure.edge_relation.unsqueeze(0)
+        edge_graph = structure.edge_graph if batched else structure.edge_graph.unsqueeze(0)
+        scene_index, edge_index = edge_mask.nonzero(as_tuple=True)
+        source = edge_source[scene_index, edge_index]
+        target = edge_target[scene_index, edge_index]
+        relation = edge_relation[scene_index, edge_index]
+        graph = edge_graph[scene_index, edge_index]
+        inverse_ids = self.inverse_relations[relation]
+        has_inverse = inverse_ids >= 0
+
+        scenes: list[torch.Tensor] = []
+        heads: list[torch.Tensor] = []
+        queries: list[torch.Tensor] = []
+        keys: list[torch.Tensor] = []
+        relations: list[torch.Tensor] = []
+        for position in range(self.config.heads.total):
+            head_scope = int(self.head_graph[position].item())
+            if head_scope < 0:
+                continue
+            selected = graph == head_scope
+            if bool(selected.any()):
+                scenes.append(scene_index[selected])
+                heads.append(torch.full_like(source[selected], position))
+                queries.append(source[selected])
+                keys.append(target[selected])
+                relations.append(relation[selected])
+            reverse = selected & has_inverse
+            if bool(reverse.any()):
+                scenes.append(scene_index[reverse])
+                heads.append(torch.full_like(source[reverse], position))
+                queries.append(target[reverse])
+                keys.append(source[reverse])
+                relations.append(inverse_ids[reverse])
+        if not scenes:
+            return None
+        routing = _RelationRouting(
+            scene=torch.cat(scenes),
+            head=torch.cat(heads),
+            query=torch.cat(queries),
+            key=torch.cat(keys),
+            relation=torch.cat(relations),
+        )
+        if edge_mask.shape[0] == batch_size:
+            return routing
+        # One structure shared by the whole batch: repeat the routing across scenes.
+        offsets = torch.arange(batch_size, device=routing.scene.device)
+        count = routing.scene.shape[0]
+        return _RelationRouting(
+            scene=offsets.repeat_interleave(count),
+            head=routing.head.repeat(batch_size),
+            query=routing.query.repeat(batch_size),
+            key=routing.key.repeat(batch_size),
+            relation=routing.relation.repeat(batch_size),
+        )
+
     def forward(self, latent: torch.Tensor, structure: AWRStructure) -> torch.Tensor:
         """Contextualise entity latents, leaving the identity slice untouched."""
         batch_size = latent.shape[0]
         mask = self.build_mask(structure, batch_size)
         bias = self.build_bias(structure, batch_size)
+        routing = self.build_routing(structure, batch_size)
+        weight = None if self.relation_value is None else self.relation_value.weight
         current = latent
         for layer in self.layers:
-            current = layer(current, mask, bias)
+            current = layer(current, mask, bias, routing, weight)
         identity_width = self.config.identity_width
         return torch.cat([latent[..., :identity_width], current[..., identity_width:]], dim=-1)

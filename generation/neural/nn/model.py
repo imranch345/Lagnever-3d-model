@@ -97,6 +97,13 @@ class PrototypeConfig:
     """
 
     graph_scope: GraphScope = "all"
+    relation_values: bool = False
+    """Whether a relation contributes a message as well as an attention weight.
+
+    Off everywhere up to Step 11, whose measurement was that relation type changed the
+    answer by 0.0003 degrees. Step 12 tests whether giving a relation its own vector closes
+    part of the 9-degree gap to a graph-aware lookup.
+    """
     use_untyped_graph: bool = False
     """Step 8: replace the partitioned typed encoder with untyped graph attention.
 
@@ -357,6 +364,7 @@ class LagnavPrototype(nn.Module):
                     layers=config.graph_layers,
                     heads=heads,
                     relation_vocabulary=config.relation_vocabulary,
+                    relation_values=config.relation_values,
                 ),
                 inverse_relations,
             )

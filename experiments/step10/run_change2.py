@@ -136,6 +136,7 @@ def _protocol(
     splits: Sequence[str],
     corpus_id: str,
     rotation_weight: float,
+    relation_values: bool,
 ) -> dict[str, Any]:
     """What must match for a saved run to be reused rather than retrained."""
     return {
@@ -147,6 +148,7 @@ def _protocol(
         "torch_threads": torch.get_num_threads(),
         "rotation_objective": ROTATION_OBJECTIVE,
         "rotation_loss_weight": rotation_weight,
+        "relation_values": relation_values,
     }
 
 
@@ -187,6 +189,7 @@ def run_change2(
     output_dir: Path,
     min_free_gib: float = 2.0,
     rotation_weight: float = ROTATION_LOSS_WEIGHT,
+    relation_values: bool = False,
 ) -> list[Path]:
     """Train each cell of each arm at each seed; write one run file per finished run."""
     frozen = _corpus_unchanged()
@@ -204,6 +207,7 @@ def run_change2(
         splits=splits,
         corpus_id=manifest.corpus_id,
         rotation_weight=rotation_weight,
+        relation_values=relation_values,
     )
     train = load_step8_split(corpus_dir, "train")
     validation = load_step8_split(corpus_dir, "validation")
@@ -227,6 +231,7 @@ def run_change2(
                     parent_convention=convention,
                     rotation_objective=ROTATION_OBJECTIVE,  # type: ignore[arg-type]
                     rotation_loss_weight=rotation_weight,
+                    relation_values=relation_values,
                     steps=steps,
                     batch_size=batch_size,
                     device=device,
@@ -348,6 +353,7 @@ def run_change2(
                     "parent_convention": convention,
                     "rotation_objective": ROTATION_OBJECTIVE,
                     "rotation_loss_weight": rotation_weight,
+                    "relation_values": relation_values,
                     "parented_entities": sum(
                         1 for slot in trainer.config.placement_parents if slot >= 0
                     ),
@@ -616,6 +622,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "weight is a different experiment and needs its own --out."
         ),
     )
+    parser.add_argument(
+        "--relation-values",
+        action="store_true",
+        help=(
+            "give each relation its own message as well as an attention weight. Step 11 "
+            "measured the weight-only channel as worth 0.0003 degrees; this is the change "
+            "that tests it. A different encoder is a different experiment and needs its own "
+            "--out."
+        ),
+    )
     parser.add_argument("--assemble-only", action="store_true")
     args = parser.parse_args(argv)
 
@@ -635,6 +651,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_dir=args.out,
             min_free_gib=args.min_free_gib,
             rotation_weight=args.rotation_weight,
+            relation_values=args.relation_values,
         )
     report = assemble(args.out, corpus_dir=args.corpus)
     print(json.dumps(report["objective"], indent=2))

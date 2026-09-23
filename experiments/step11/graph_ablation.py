@@ -109,8 +109,13 @@ def ablate(
     runs_dir: Path,
     conditions: Sequence[str] = CONDITIONS,
     batch_size: int = 16,
+    relation_values: bool = False,
 ) -> dict[str, Any]:
-    """Score every condition on every frozen A3 seed."""
+    """Score every condition on every frozen A3 seed.
+
+    ``relation_values`` must match the encoder the checkpoints were trained with, or the state
+    dict will not load. It defaults to off, which is every checkpoint up to Step 11.
+    """
     domain = load_domain_config()
     ontology = load_ontology(
         domain.domain.ontology_dir, expected_version=domain.domain.ontology_version
@@ -131,6 +136,7 @@ def ablate(
             ),
             rotation_objective="chordal",
             rotation_loss_weight=WEIGHT,
+            relation_values=relation_values,
             device="cpu",
         )
         trainer = Step10Trainer(config, ontology, domain, small, small)
@@ -185,6 +191,7 @@ def ablate(
         "split": SPLIT,
         "test_splits_read": [],
         "arm": "A3",
+        "relation_values": relation_values,
         "rotation_loss_weight": WEIGHT,
         "minimum_meaningful_deg": MINIMUM_MEANINGFUL_DEG,
         "rule": (
@@ -210,9 +217,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--out", type=Path, default=Path("experiments/runs/step11/graph_ablation.json")
     )
+    parser.add_argument(
+        "--relation-values",
+        action="store_true",
+        help="match the Step 12 encoder; required to load Step 12 checkpoints.",
+    )
     args = parser.parse_args(argv)
 
-    report = ablate(corpus_dir=args.corpus, runs_dir=args.runs)
+    report = ablate(
+        corpus_dir=args.corpus, runs_dir=args.runs, relation_values=args.relation_values
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print("\ncondition                     rotation   delta   same sign   meaningful")

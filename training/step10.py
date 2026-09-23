@@ -88,6 +88,14 @@ class Step10Config(Step9Config):
     placement_parents: tuple[int, ...] = ()
     """Filled by :meth:`resolved` from the ontology; never set this by hand."""
 
+    relation_values: bool = False
+    """Whether a relation contributes a message as well as an attention weight.
+
+    Step 11 measured relation type as worth 0.0003 degrees, because its only channel was a
+    scalar attention bias that trained to 0.55% of the logit scale. This is the channel Step
+    12 adds. Off reproduces every earlier run exactly.
+    """
+
     rotation_objective: RotationObjective = "step8_6d_l1"
     """How rotation is penalised.
 
@@ -141,6 +149,7 @@ class Step10Config(Step9Config):
         payload = super().overrides()
         payload.update(
             {
+                "relation_values": self.relation_values,
                 "placement_target": self.placement_target,
                 "placement_parents": self.placement_parents,
                 "placement_hierarchy": self.placement_hierarchy,
@@ -153,6 +162,7 @@ class Step10Config(Step9Config):
         """Plain data, for the run manifest."""
         payload = super().to_dict()
         payload["step10"] = {
+            "relation_values": self.relation_values,
             "rotation_objective": self.rotation_objective,
             "rotation_loss_weight": self.rotation_loss_weight,
             "placement_target": self.placement_target,
