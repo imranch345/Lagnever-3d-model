@@ -72,8 +72,12 @@ from training.whole_organ import WholeOrganLoader
 
 __all__ = ["EVERY", "SEED_ROLES", "TrajectoryRecorder", "record_seed", "main"]
 
-#: Checkpoint interval, fixed in the brief.
+#: Checkpoint interval, fixed in the Step 16 brief.
 EVERY = 50
+
+#: Step 17's dense interval, inside its declared window. The window itself is passed in, so
+#: this module carries no assumption about where an escape happens.
+DENSE_EVERY = 5
 
 #: The three seeds and why each was chosen, from the frozen Step 15 report.
 SEED_ROLES: dict[int, str] = {
@@ -126,9 +130,13 @@ class TrajectoryRecorder:
         required: set[tuple[int, int]],
         validation: Sequence[Any],
         train_batches: Sequence[Any],
+        dense_window: tuple[int, int] | None = None,
+        dense_every: int = DENSE_EVERY,
     ) -> None:
         self.corpus_dir = corpus_dir
         self.required = required
+        self.dense_window = dense_window
+        self.dense_every = dense_every
         self.rows: list[dict[str, Any]] = []
         self._batches = _ordered_validation_batches(validation, builder)
         self._train_batches = list(train_batches)
@@ -184,9 +192,23 @@ class TrajectoryRecorder:
         }
 
     # ------------------------------------------------------------------
+    def is_checkpoint(self, step: int, total: int) -> bool:
+        """Whether this step is measured: the 50-step grid, the final step, or the dense window.
+
+        Step 17 adds the window. Keeping the coarse grid outside it means a dense run still
+        carries the Step 16 checkpoints, so the two can be compared at the steps they share
+        without a second training run.
+        """
+        if step == total or step % EVERY == 0:
+            return True
+        if self.dense_window is None:
+            return False
+        low, high = self.dense_window
+        return low <= step <= high and step % self.dense_every == 0
+
     def __call__(self, trainer: Any, step: int) -> None:
         """One checkpoint. Restores RNG, gradients and training mode before returning."""
-        if step % EVERY and step != trainer.config.steps:
+        if not self.is_checkpoint(step, trainer.config.steps):
             return
         started = time.time()
         python_state = random.getstate()
@@ -290,7 +312,13 @@ def _required_entities(corpus_dir: Path, builder: WholeOrganBatchBuilder) -> set
     return required
 
 
-def record_seed(*, corpus_dir: Path, seed: int, out_dir: Path) -> dict[str, Any]:
+def record_seed(
+    *,
+    corpus_dir: Path,
+    seed: int,
+    out_dir: Path,
+    dense_window: tuple[int, int] | None = None,
+) -> dict[str, Any]:
     """Train one instrumented run and return its trajectory."""
     domain = load_domain_config()
     ontology = load_ontology(
@@ -329,8 +357,15 @@ def record_seed(*, corpus_dir: Path, seed: int, out_dir: Path) -> dict[str, Any]
         required=_required_entities(corpus_dir, builder),
         validation=validation,
         train_batches=list(fixed.epoch(0)),
+        dense_window=dense_window,
     )
     print(f"[step16] seed {seed} ({SEED_ROLES.get(seed, 'unlisted')})", flush=True)
+    if dense_window is not None:
+        print(
+            f"[step16]   dense window {dense_window[0]}-{dense_window[1]} "
+            f"every {DENSE_EVERY} steps",
+            flush=True,
+        )
     started = time.time()
     trainer.fit(checkpoint_dir=out_dir / "checkpoints", on_step=recorder)
     rows = recorder.rows
@@ -362,6 +397,8 @@ def record_seed(*, corpus_dir: Path, seed: int, out_dir: Path) -> dict[str, Any]
         "split_measured": "validation",
         "test_splits_read": [],
         "checkpoint_every": EVERY,
+        "dense_window": list(dense_window) if dense_window else None,
+        "dense_every": DENSE_EVERY if dense_window else None,
         "steps": config.steps,
         "thresholds": {"graph_using": GRAPH_USING_DEG, "non_using": NON_USING_DEG},
         "escape": escape,
@@ -382,10 +419,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--corpus", type=Path, default=Path("datasets/processed/step10_rotated"))
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, default=Path("experiments/runs/step16"))
+    parser.add_argument(
+        "--dense-window",
+        type=int,
+        nargs=2,
+        metavar=("FROM", "TO"),
+        default=None,
+        help=(
+            "Step 17: also measure every %(default)s steps inside this inclusive window, on "
+            "top of the 50-step grid. The window must be declared before the run."
+        ),
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="artifact stem, to avoid overwriting a frozen trajectory",
+    )
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
-    report = record_seed(corpus_dir=args.corpus, seed=args.seed, out_dir=args.out)
-    target = args.out / f"trajectory_seed{args.seed}.json"
+    window = tuple(args.dense_window) if args.dense_window else None
+    report = record_seed(
+        corpus_dir=args.corpus, seed=args.seed, out_dir=args.out, dense_window=window
+    )
+    stem = args.name or f"trajectory_seed{args.seed}"
+    target = args.out / f"{stem}.json"
     target.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nescape: {report['escape']}")
     print(f"written to {target}")
