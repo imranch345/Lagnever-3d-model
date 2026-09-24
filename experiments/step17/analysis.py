@@ -131,18 +131,30 @@ def _first_change(
     }
 
 
-def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path) -> dict[str, Any]:
-    """The whole Step 17 analysis."""
+def analyse(
+    *,
+    dense_path: Path,
+    frozen_escaper: Path,
+    frozen_non_escaper: Path,
+    window: tuple[int, int] = WINDOW,
+    baseline: tuple[int, int] = BASELINE,
+    reproduction_steps: Sequence[int] = (750, 800, 850, 900, 1200),
+) -> dict[str, Any]:
+    """The whole analysis, for any declared window and preceding baseline.
+
+    Step 18 reuses this with a different window, so the two steps cannot drift apart in how
+    they detect a change, exclude a candidate or classify a case. The defaults are Step 17's.
+    """
     dense_report = json.loads(dense_path.read_text(encoding="utf-8"))
     trajectory = dense_report["trajectory"]
     frozen = json.loads(frozen_escaper.read_text(encoding="utf-8"))["trajectory"]
     other = json.loads(frozen_non_escaper.read_text(encoding="utf-8"))["trajectory"]
 
     usage = _series(trajectory, "graph_usage_deg")
-    escape = _escape(_dense(usage, WINDOW))
+    escape = _escape(_dense(usage, window))
 
     changes = {
-        name: _first_change(_series(trajectory, name), BASELINE, WINDOW)
+        name: _first_change(_series(trajectory, name), baseline, window)
         for name in SERIES
         if _series(trajectory, name)
     }
@@ -150,7 +162,7 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
     # ---- reproduction against the frozen Step 16 run, at shared checkpoints ----
     frozen_series = {name: _series(frozen, name) for name in SERIES}
     reproduction = {}
-    for step in (750, 800, 850, 900, 1200):
+    for step in reproduction_steps:
         row: dict[str, Any] = {}
         for name in ("validation_rotation_deg", "graph_usage_deg", "relational_subset_deg"):
             new = _series(trajectory, name).get(step)
@@ -259,10 +271,11 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
         "status": "diagnostic; single run; correlational, no causal claim",
         "preregistration": "docs/STEP_17_HIGH_RES_ESCAPE_PLAN.md",
         "test_splits_read": [],
-        "window": list(WINDOW),
+        "seed": dense_report.get("seed"),
+        "window": list(window),
         "dense_every": dense_report.get("dense_every"),
-        "dense_checkpoints": len(_dense(usage, WINDOW)),
-        "baseline": list(BASELINE),
+        "dense_checkpoints": len(_dense(usage, window)),
+        "baseline": list(baseline),
         "criterion": (
             f"first dense checkpoint more than {SIGMA} pre-window baseline standard deviations "
             f"from the baseline mean, sustained across {PERSISTENCE} dense checkpoints"
@@ -302,14 +315,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--non-escaper", type=Path, default=Path("experiments/runs/step16/trajectory_seed5.json")
     )
     parser.add_argument("--out", type=Path, default=Path("experiments/runs/step17/analysis.json"))
+    parser.add_argument("--window", type=int, nargs=2, default=list(WINDOW))
+    parser.add_argument("--baseline", type=int, nargs=2, default=list(BASELINE))
+    parser.add_argument(
+        "--reproduction-steps", type=int, nargs="+", default=[750, 800, 850, 900, 1200]
+    )
     args = parser.parse_args(argv)
     report = analyse(
-        dense_path=args.dense, frozen_escaper=args.frozen, frozen_non_escaper=args.non_escaper
+        dense_path=args.dense,
+        frozen_escaper=args.frozen,
+        frozen_non_escaper=args.non_escaper,
+        window=(args.window[0], args.window[1]),
+        baseline=(args.baseline[0], args.baseline[1]),
+        reproduction_steps=args.reproduction_steps,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    print(f"dense checkpoints in {WINDOW}: {report['dense_checkpoints']}")
+    print(f"seed {report['seed']}, window {report['window']}, baseline {report['baseline']}")
+    print(f"dense checkpoints: {report['dense_checkpoints']}")
     print(f"reproduces frozen seed 9 at shared checkpoints: {report['reproduces_frozen_seed9']}")
     print(f"\nescape: {report['escape']['interval']}")
     print(f"transient crossings: {report['escape']['transient_crossings']}")
