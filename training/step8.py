@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -354,11 +354,27 @@ class Step8Trainer:
             use_predicted_frames=True,
         )
 
-    def fit(self, *, checkpoint_dir: str | Path | None = None) -> RunManifest:
-        """Train, then evaluate with predicted placement."""
+    def fit(
+        self,
+        *,
+        checkpoint_dir: str | Path | None = None,
+        on_step: Callable[[Step8Trainer, int], None] | None = None,
+    ) -> RunManifest:
+        """Train, then evaluate with predicted placement.
+
+        ``on_step`` is Step 16's diagnostic hook. It is called with the trainer and the step
+        *about to run*, so a call at step 0 observes the initialisation, and once more after the
+        loop with ``steps`` as the step. It defaults to ``None``, in which case this method is
+        byte-for-byte the loop every run from Step 8 onward used: a callback that is never
+        installed cannot change a trajectory. A callback that touches RNG, the optimiser or
+        ``model.training`` *would*, so the one in ``experiments/step16`` restores all three and
+        a test asserts the frozen result is unchanged.
+        """
         started = time.time()
         stream: Iterator[WholeOrganBatch] = self.train_loader.infinite()
         for step in range(self.config.steps):
+            if on_step is not None:
+                on_step(self, step)
             record = self.train_step(next(stream), step)
             if step % self.config.log_every == 0 or step == self.config.steps - 1:
                 self.manifest.train_history.append(record)
@@ -367,6 +383,8 @@ class Step8Trainer:
                 validation["step"] = float(step)
                 self.manifest.validation_history.append(validation)
 
+        if on_step is not None:
+            on_step(self, self.config.steps)
         self.manifest.steps_completed = self.config.steps
         final = self.evaluate()
         final["step"] = float(self.config.steps)
