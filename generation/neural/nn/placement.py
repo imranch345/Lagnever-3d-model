@@ -147,6 +147,11 @@ class HierarchicalPlacement:
         """The static parent table, for the run manifest."""
         return tuple(int(slot) for slot in self._static.tolist())
 
+    @property
+    def order(self) -> tuple[int, ...]:
+        """The composition order, for the integrity gate."""
+        return tuple(int(slot) for slot in self._order.tolist())
+
     def to_local(self, frames: torch.Tensor, present: torch.Tensor) -> PlacementTarget:
         """Turn the corpus's global frames into the parent-relative target.
 

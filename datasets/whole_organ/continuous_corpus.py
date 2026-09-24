@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,7 @@ import numpy as np
 from datasets.whole_organ.arrangement import (
     ARRANGEMENT_FIELDS,
     Arrangement,
+    axis_ranges,
     classify_arrangement,
     sample_arrangement,
 )
@@ -61,10 +62,12 @@ from datasets.whole_organ.corpus import (
 )
 from datasets.whole_organ.field import WHOLE_ORGAN_ENTITIES
 from datasets.whole_organ.parameters import DATA_LABEL
+from datasets.whole_organ.rotation_stats import scene_angles, summarise_angles
 
 __all__ = [
     "STEP8_SPLITS",
     "TEST_SPLITS",
+    "derive_rotated_corpus",
     "Step8Manifest",
     "generate_step8_corpus",
     "load_step8_manifest",
@@ -83,6 +86,13 @@ STEP8_SPLITS: tuple[str, ...] = (
 )
 
 #: The four that answer a generalisation question.
+#: Bumped when the generator changes what it writes. Change 2 added measured rotations.
+GENERATOR_VERSION = "whole-organ-generator-2"
+
+#: What wrote every manifest that carries no ``generator_version`` field, the Change 1 corpus
+#: among them. Defaulting those to the current version would relabel the frozen corpus.
+PARENT_GENERATOR_VERSION = "whole-organ-generator-1"
+
 TEST_SPLITS: tuple[str, ...] = (
     "test_seen",
     "test_arrangement",
@@ -118,6 +128,32 @@ class Step8Manifest:
     arrangement_span: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
     data_label: str = DATA_LABEL
     notes: tuple[str, ...] = ()
+    rotation_enabled: bool = False
+    """Whether entity frames carry measured rotations or the identity."""
+    parent_corpus_id: str | None = None
+    """The corpus this one is derived from, when it is a variant of an earlier one."""
+    generator_version: str = GENERATOR_VERSION
+    generator_commit: str | None = None
+    random_seed: int | None = None
+    rotation_distribution: Mapping[str, Any] = field(default_factory=dict)
+    """How rotations were produced, and the measured angle statistics per split."""
+    changes_from_parent: tuple[str, ...] = ()
+    """Everything that differs from the parent corpus, rotation included."""
+
+    @property
+    def arrangement_count(self) -> int:
+        """Arrangements drawn: one per scene, from a continuous space."""
+        return self.scenes
+
+    @property
+    def family_count(self) -> int:
+        """Archetype families the scenes are drawn from."""
+        return self.families
+
+    @property
+    def split_definition(self) -> dict[str, str]:
+        """Which arrangement region each split draws from."""
+        return dict(_REGION_OF)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to plain data."""
@@ -137,6 +173,16 @@ class Step8Manifest:
             },
             "data_label": self.data_label,
             "notes": list(self.notes),
+            "rotation_enabled": self.rotation_enabled,
+            "parent_corpus_id": self.parent_corpus_id,
+            "generator_version": self.generator_version,
+            "generator_commit": self.generator_commit,
+            "random_seed": self.random_seed,
+            "rotation_distribution": dict(self.rotation_distribution),
+            "changes_from_parent": list(self.changes_from_parent),
+            "arrangement_count": self.arrangement_count,
+            "family_count": self.family_count,
+            "split_definition": self.split_definition,
         }
 
     @classmethod
@@ -161,6 +207,23 @@ class Step8Manifest:
             },
             data_label=str(payload.get("data_label", DATA_LABEL)),
             notes=tuple(payload.get("notes", ())),
+            rotation_enabled=bool(payload.get("rotation_enabled", False)),
+            parent_corpus_id=(
+                str(payload["parent_corpus_id"])
+                if payload.get("parent_corpus_id") is not None
+                else None
+            ),
+            generator_version=str(payload.get("generator_version", PARENT_GENERATOR_VERSION)),
+            generator_commit=(
+                str(payload["generator_commit"])
+                if payload.get("generator_commit") is not None
+                else None
+            ),
+            random_seed=(
+                int(payload["random_seed"]) if payload.get("random_seed") is not None else None
+            ),
+            rotation_distribution=dict(payload.get("rotation_distribution", {})),
+            changes_from_parent=tuple(payload.get("changes_from_parent", ())),
         )
 
 
@@ -185,6 +248,35 @@ def _family_assignment(families: int) -> dict[str, list[int]]:
     }
 
 
+def _rotation_provenance() -> dict[str, Any]:
+    """How a rotated corpus's rotations were produced, recorded in its manifest."""
+    return {
+        "source": (
+            "declared from the generator's construction: an annulus or a tube takes its own "
+            "axis as the frame's third row, with the other two fixed by convention because a "
+            "circular vessel is symmetric about its axis; every other entity takes the "
+            "organ-to-scene rotation built from the arrangement's yaw, pitch and roll. "
+            "Ground truth, not an augmentation applied afterwards."
+        ),
+        "why_declared_not_principal_axes": (
+            "a chamber is nearly an ellipsoid of revolution, so its second and third "
+            "principal axes are decided by sampling noise and the target would be a coin flip"
+        ),
+        "applied": "before measurement: the geometry is rotated, then measured",
+        "hierarchy_conditioned": (
+            "yes: every entity in a scene shares that scene's organ rotation, and an annulus "
+            "or tube composes its construction axis on top of it"
+        ),
+        "independent_per_entity": False,
+        "may_rotate": "every entity; ten carry the organ rotation alone, ten also an axis",
+        "scene_rotation_fields": ["yaw", "pitch", "roll"],
+        "scene_rotation_bounds_rad": {
+            name: list(axis_ranges()[name]) for name in ("yaw", "pitch", "roll")
+        },
+        "ground_truth": True,
+    }
+
+
 def generate_step8_corpus(
     output_dir: str | Path,
     *,
@@ -195,8 +287,16 @@ def generate_step8_corpus(
     lod_choices: Sequence[int] = (1, 2, 3),
     corpus_id: str | None = None,
     seed: int = 20_250_915,
+    rotations: bool = False,
+    parent_corpus_id: str | None = None,
+    generator_commit: str | None = None,
 ) -> Step8Manifest:
-    """Generate a Step 8 corpus and write one JSONL file per split."""
+    """Generate a corpus and write one JSONL file per split.
+
+    ``rotations`` records each entity's declared rotation and measures its extents in that
+    frame; everything else about a scene is drawn identically either way. Left false, this
+    reproduces the Change 1 corpus exactly.
+    """
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
     assignment = _family_assignment(families)
@@ -207,6 +307,8 @@ def generate_step8_corpus(
     }
 
     counts: dict[str, int] = dict.fromkeys(STEP8_SPLITS, 0)
+    angles: dict[str, list[float]] = {name: [] for name in STEP8_SPLITS}
+    entity_angles: dict[str, list[float]] = {}
     lod_counts: dict[int, int] = {}
     signatures: set[str] = set()
     span: dict[str, dict[str, float]] = {}
@@ -233,10 +335,15 @@ def generate_step8_corpus(
                         family_id=family_id,
                         lod=lod,
                         arrangement=arrangement,
+                        rotations=rotations,
                     )
                 except RuntimeError:
                     index += 1
                     continue
+                if rotations:
+                    for entity_id, angle in scene_angles(scene.frames()).items():
+                        angles[split].append(angle)
+                        entity_angles.setdefault(entity_id, []).append(angle)
                 handles[split].write(json.dumps(scene.to_dict(), separators=(",", ":")) + "\n")
                 counts[split] += 1
                 lod_counts[lod] = lod_counts.get(lod, 0) + 1
@@ -266,6 +373,17 @@ def generate_step8_corpus(
         for handle in handles.values():
             handle.close()
 
+    distribution: dict[str, Any] = {}
+    if rotations:
+        distribution = {
+            **_rotation_provenance(),
+            "splits": {name: summarise_angles(values) for name, values in angles.items()},
+            "entities": {
+                entity_id: summarise_angles(values)
+                for entity_id, values in sorted(entity_angles.items())
+            },
+        }
+
     manifest = Step8Manifest(
         corpus_id=corpus_id or f"step8-continuous-{sum(counts.values())}-{families}",
         format_version=CORPUS_FORMAT_VERSION,
@@ -287,6 +405,172 @@ def generate_step8_corpus(
             "Presence, text features and entity ordering are identical across every "
             "arrangement. The relationship graph is the only channel that carries it.",
             "Synthetic research data. Not anatomy, not validated, not clinical.",
+        ),
+        rotation_enabled=rotations,
+        parent_corpus_id=parent_corpus_id,
+        generator_commit=generator_commit,
+        random_seed=seed,
+        rotation_distribution=distribution,
+        changes_from_parent=(
+            (
+                "entity frames carry measured rotations instead of the identity",
+                "extents are measured on each entity's own frame axes, not the world axes, "
+                "because an oriented frame with world-axis extents describes a different box",
+            )
+            if rotations
+            else ()
+        ),
+    )
+    (target / "manifest.json").write_text(
+        json.dumps(manifest.to_dict(), indent=2), encoding="utf-8"
+    )
+    return manifest
+
+
+def derive_rotated_corpus(
+    parent_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    corpus_id: str | None = None,
+    generator_commit: str | None = None,
+    centroid_tolerance: float = 1e-4,
+    declared_parent_seed: int | None = None,
+) -> Step8Manifest:
+    """Re-measure an existing corpus's frames with rotations, changing nothing else.
+
+    Every stored input is carried over verbatim — the generator parameters, the centroids, the
+    relationship graph, the point counts, presence, the level of detail, the split and family
+    assignment — and only two things are replaced: each entity's rotation, and its extents,
+    which are re-measured on that rotation's own axes.
+
+    Deriving rather than generating afresh is deliberate. The relationship graph is the channel
+    that carries the arrangement to the model, and until this pass the adjacency draws iterated
+    a set of entity ids, so they depended on hash randomisation and a freshly generated corpus
+    did not reproduce its predecessor's graphs. That is fixed, but the parent corpus was written
+    before the fix and is frozen, so the only way to hold the graphs exactly constant is to copy
+    them. What remains is a corpus that differs from its parent in the frame measurement and in
+    nothing else.
+
+    Raises:
+        ValueError: if a re-measured centroid does not reproduce the stored one, which would
+            mean the derivation is not measuring the same scene.
+
+    """
+    parent_path, target = Path(parent_dir), Path(output_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    parent = load_step8_manifest(parent_path)
+
+    angles: dict[str, list[float]] = {name: [] for name in STEP8_SPLITS}
+    entity_angles: dict[str, list[float]] = {}
+    counts: dict[str, int] = dict.fromkeys(STEP8_SPLITS, 0)
+    lod_counts: dict[int, int] = {}
+    signatures: set[str] = set()
+    worst_centroid = 0.0
+
+    handles = {
+        name: (target / f"{name}.jsonl").open("w", encoding="utf-8") for name in STEP8_SPLITS
+    }
+    try:
+        for split in STEP8_SPLITS:
+            for scene in iter_step8_split(parent_path, split):
+                organ = scene.field()
+                measured = organ.oriented_statistics(np.random.default_rng(scene.seed + 11))
+                missing = set(scene.centroids) - set(measured)
+                if missing:
+                    raise ValueError(
+                        f"{scene.scene_id}: re-measuring lost {sorted(missing)}; the "
+                        "derivation is not reproducing the parent's scene"
+                    )
+                for entity_id, stored in scene.centroids.items():
+                    deviation = float(
+                        np.abs(measured[entity_id]["centroid"] - np.asarray(stored)).max()
+                    )
+                    worst_centroid = max(worst_centroid, deviation)
+                    if deviation > centroid_tolerance:
+                        raise ValueError(
+                            f"{scene.scene_id}/{entity_id}: re-measured centroid differs from "
+                            f"the stored one by {deviation:.3e}"
+                        )
+                rotated = replace(
+                    scene,
+                    extents={
+                        entity_id: measured[entity_id]["frame_extent"].tolist()
+                        for entity_id in scene.centroids
+                    },
+                    rotations={
+                        entity_id: measured[entity_id]["rotation"].tolist()
+                        for entity_id in scene.centroids
+                    },
+                )
+                handles[split].write(
+                    json.dumps(rotated.to_dict(), separators=(",", ":")) + "\n"
+                )
+                counts[split] += 1
+                lod_counts[rotated.active_lod] = lod_counts.get(rotated.active_lod, 0) + 1
+                signatures.add(
+                    "|".join(
+                        sorted(f"{e.subject}|{e.relation}|{e.object}" for e in rotated.edges)
+                    )
+                )
+                for entity_id, angle in scene_angles(rotated.frames()).items():
+                    angles[split].append(angle)
+                    entity_angles.setdefault(entity_id, []).append(angle)
+    finally:
+        for handle in handles.values():
+            handle.close()
+
+    if counts != dict(parent.split_counts):
+        raise ValueError(
+            f"derived {counts} scenes but the parent holds {dict(parent.split_counts)}"
+        )
+
+    manifest = Step8Manifest(
+        corpus_id=corpus_id or f"step10-rotated-{sum(counts.values())}-{parent.families}",
+        format_version=parent.format_version,
+        scenes=sum(counts.values()),
+        families=parent.families,
+        split_counts=counts,
+        split_families=parent.split_families,
+        lod_distribution=lod_counts,
+        distinct_relation_graphs=len(signatures),
+        entity_count=parent.entity_count,
+        arrangement_span=parent.arrangement_span,
+        notes=(
+            *parent.notes,
+            "Derived from the parent corpus by re-measuring frames; every other stored "
+            "field is the parent's, so the relationship graphs are identical rather than "
+            "merely similar.",
+        ),
+        rotation_enabled=True,
+        parent_corpus_id=parent.corpus_id,
+        generator_commit=generator_commit,
+        random_seed=(
+            parent.random_seed if parent.random_seed is not None else declared_parent_seed
+        ),
+        rotation_distribution={
+            **_rotation_provenance(),
+            "derived_from": parent.corpus_id,
+            "seed_provenance": (
+                "the parent manifest records its own seed"
+                if parent.random_seed is not None
+                else "the parent manifest predates the random_seed field; the value recorded "
+                "here is the generating CLI's default, declared rather than read back"
+            ),
+            "per_scene_seed": (
+                "each scene carries its own seed; re-measuring uses scene.seed + 11, the same "
+                "generator state the parent measured with"
+            ),
+            "worst_centroid_deviation_on_rederivation": worst_centroid,
+            "splits": {name: summarise_angles(values) for name, values in angles.items()},
+            "entities": {
+                entity_id: summarise_angles(values)
+                for entity_id, values in sorted(entity_angles.items())
+            },
+        },
+        changes_from_parent=(
+            "entity frames carry measured rotations instead of the identity",
+            "extents are measured on each entity's own frame axes, not the world axes, "
+            "because an oriented frame with world-axis extents describes a different box",
         ),
     )
     (target / "manifest.json").write_text(

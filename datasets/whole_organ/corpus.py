@@ -82,6 +82,12 @@ class WholeOrganScene:
     counts: dict[str, int]
     edges: tuple[MeasuredEdge, ...]
     data_label: str = DATA_LABEL
+    rotations: dict[str, list[float]] = field(default_factory=dict)
+    """Two frame basis rows per entity, in scene coordinates. Empty means identity.
+
+    Empty is what every corpus written before Change 2 holds, and those corpora must keep
+    loading and scoring exactly as they did: the Change 1 result is read against them.
+    """
 
     @property
     def arrangement(self) -> Arrangement:
@@ -113,21 +119,24 @@ class WholeOrganScene:
         allowed = set(LOD_ENTITIES[min(max(level, 0), 4)])
         return tuple(entity_id for entity_id in self.entity_ids if entity_id in allowed)
 
+    @property
+    def has_rotations(self) -> bool:
+        """Whether this scene carries measured rotations rather than the identity."""
+        return bool(self.rotations)
+
     def frames(self) -> dict[str, list[float]]:
-        """Canonical frames, measured from the labelled field."""
+        """Canonical frames, measured from the labelled field.
+
+        The rotation is the identity for a corpus generated without it, which is every
+        corpus up to and including the one Change 1 was run on. The extents are then on the
+        world axes and the frame is axis-aligned, so the two halves agree either way.
+        """
+        identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         out: dict[str, list[float]] = {}
         for entity_id, centroid in self.centroids.items():
             extent = np.maximum(np.asarray(self.extents[entity_id]), 1e-3)
-            out[entity_id] = [
-                *centroid,
-                *np.log(extent).tolist(),
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                0.0,
-            ]
+            rotation = self.rotations.get(entity_id, identity)
+            out[entity_id] = [*centroid, *np.log(extent).tolist(), *rotation]
         return out
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,6 +156,15 @@ class WholeOrganScene:
             "extents": {k: [round(x, 5) for x in v] for k, v in self.extents.items()},
             "counts": dict(self.counts),
             "edges": [[e.subject, e.relation, e.object] for e in self.edges],
+            **(
+                {
+                    "rotations": {
+                        k: [round(x, 8) for x in v] for k, v in self.rotations.items()
+                    }
+                }
+                if self.rotations
+                else {}
+            ),
         }
 
     @classmethod
@@ -165,6 +183,10 @@ class WholeOrganScene:
             counts={k: int(v) for k, v in payload["counts"].items()},
             edges=tuple(MeasuredEdge(*triple) for triple in payload["edges"]),
             data_label=str(payload.get("data_label", DATA_LABEL)),
+            rotations={
+                k: [float(x) for x in v]
+                for k, v in payload.get("rotations", {}).items()
+            },
         )
 
 
@@ -178,8 +200,15 @@ def build_scene(
     ontology_id: str = "lagnav.heart",
     ontology_version: str = "0.1.0",
     max_attempts: int = 24,
+    rotations: bool = False,
 ) -> WholeOrganScene:
     """Generate one organ, resampling until all twenty entities own volume.
+
+    ``rotations`` records each entity's declared rotation and measures its extents in that
+    frame. It changes nothing else: the parameters, the proposals, the centroids, the
+    presence and the relationship graph are drawn from generators in the same states, so the
+    same ``scene_index`` yields the same scene either way apart from the extent basis and the
+    new rotation. Leaving it false reproduces every corpus written before Change 2.
 
     Raises:
         RuntimeError: if no sample succeeds. Presence must be uniform across variants or
@@ -191,9 +220,12 @@ def build_scene(
         rng = np.random.default_rng(seed)
         parameters = sample_parameters(rng, family_id, variant, arrangement=arrangement)
         organ = WholeOrganField(parameters)
-        statistics = organ.entity_statistics(np.random.default_rng(seed + 11))
+        measure = organ.oriented_statistics if rotations else organ.entity_statistics
+        statistics = measure(np.random.default_rng(seed + 11))
         if len(statistics) < len(WHOLE_ORGAN_ENTITIES):
             continue
+        # Relations read centroids only, and the centroids are the same either way, so the
+        # relationship graph of a rotated scene is the graph of its unrotated twin.
         edges = measure_relations(organ, statistics, np.random.default_rng(seed + 23))
         return WholeOrganScene(
             scene_id=f"whole-{scene_index:06d}",
@@ -204,9 +236,15 @@ def build_scene(
             active_lod=lod,
             parameters=parameters,
             centroids={k: v["centroid"].tolist() for k, v in statistics.items()},
-            extents={k: v["extent"].tolist() for k, v in statistics.items()},
+            extents={
+                k: v["frame_extent" if rotations else "extent"].tolist()
+                for k, v in statistics.items()
+            },
             counts={k: int(v["count"][0]) for k, v in statistics.items()},
             edges=edges,
+            rotations=(
+                {k: v["rotation"].tolist() for k, v in statistics.items()} if rotations else {}
+            ),
         )
     raise RuntimeError(
         f"Could not generate a complete organ for family {family_id} in "

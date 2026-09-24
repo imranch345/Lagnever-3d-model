@@ -161,13 +161,18 @@ class TestCorruptingTheOrder:
 class TestCorruptingTheTransform:
     """The conventions the target's exactness depends on."""
 
-    def test_transposing_a_rotation_is_detected(self, scene) -> None:
-        """The first version of frame_to_matrix had exactly this bug."""
+    def test_swapping_the_stored_basis_vectors_is_detected(self, scene) -> None:
+        """A corrupted local rotation must not compose back to the truth.
+
+        Swapping the two stored vectors is *not* a transpose: on this corpus's identity
+        rotations it produces a 180-degree turn about (1, 1, 0), while a real transpose of
+        the identity changes nothing. The transpose itself is tested, with real rotations,
+        in ``test_step10_corruption``.
+        """
         builder, frames, present = scene
         placement = _placement(builder, frames.shape[1])
         target = placement.to_local(frames, present)
         flipped = target.local.clone()
-        # swap the two stored basis vectors, which transposes the recovered rotation
         flipped[..., 6:9], flipped[..., 9:12] = target.local[..., 9:12], target.local[..., 6:9]
         rebuilt = placement.to_global(flipped, target.parents)
         moved = (frame_to_matrix(rebuilt)[1] - frame_to_matrix(frames)[1])[present].abs().max()

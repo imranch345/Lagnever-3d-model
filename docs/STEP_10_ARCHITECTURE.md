@@ -11,6 +11,14 @@ Step 9 target could not. A claim of that shape is only testable if the ruler doe
 with the target, and a local target has smaller residuals by construction, so scoring
 locally would flatter the change for arithmetic reasons.
 
+**This document describes Change 1's design first**, because that is what most of the
+machinery was built for. Change 2 asks a different question — whether position, rotation and
+scale are learned at all once rotation is genuinely present — and has its own corpus, its own
+floors and its own objective; both are covered below. Neither claim survived: Change 1's
+parent-relative target placed worse than the global one in all five arms, and Change 2's
+rotation did not beat its floor in any. The design is documented here because it is what the
+code does, not because it worked.
+
 ## What Step 10 changes
 
 | | Step 9 | Step 10 Change 1 |
@@ -107,17 +115,91 @@ is worth about 24% of position error **conditional on placing parents well**, an
 about 2% to a predictor that does not. Step 9 found only A3 reliably clears the floor, so
 the expected outcome is that Change 1 helps A3 and does little for the cheaper arms.
 
+**That prediction was not supported.** Change 1 made every arm worse, and A3 worst of all
+(+7.8%), losing its floor-clearing margin. The premise is what failed: clearing the floor is
+not the same as placing parents well enough to compose against. See
+`docs/STEP_10_CHANGE1_REPORT.md`.
+
 ## Rotation: the metric and the loss are different functions
 
 `rotation_angle` is the geodesic angle and is what gets reported. `rotation_chordal` is a
-monotone, smooth, bounded equivalent and is what should be descended. `arccos` has an
-unbounded derivative at zero, so a nearly-correct model would receive an arbitrarily large
-gradient from the geodesic form. The same singularity is why `rotation_angle` returns about
-3e-8 rather than 0 for a rotation against itself in float64.
+monotone, smooth, bounded equivalent and is what gets descended. `arccos` has an unbounded
+derivative at zero, so a nearly-correct model would receive an arbitrarily large gradient
+from the geodesic form — measured at 1e-3 rad, more than 100× the chordal form's. The same
+singularity is why `rotation_angle` returns about 3e-8 rather than 0 for a rotation against
+itself in float64.
+
+Change 2 made this live. `Step10Config.rotation_objective` selects the term: `step8_6d_l1`
+is Step 8's, the absolute difference of the six stored numbers, and remains the default so
+Change 1 stays reproducible; `chordal` is Change 2's. The chordal term is taken **after** the
+model's Gram-Schmidt, so it is a distance on rotations and cannot be reduced by inflating the
+stored basis vectors — which the six-number term can. Its weight, 0.33, was calibrated on
+training data with the term unoptimised. ADR-STEP10-003 records the decision and its cost:
+the weight leaves rotation at 7% of the frame loss, because Step 8's scale term takes 64%.
+
+## Change 2: the corpus the rotation target needed
+
+Change 1's corpus stored an identity rotation for every entity of every scene, so a parent
+could pass its children a translation and a scale but no orientation, and no rotation result
+was obtainable. The generator had been computing those rotations all along —
+`WholeOrganScene.frames()` discarded them and wrote the identity.
+
+`step10-rotated-1950-40` is the Change 1 corpus with its frames re-measured: each entity's
+rotation declared from the generator's construction, and its extents measured on that
+rotation's own axes. Every other stored field is carried over verbatim, so the two corpora are
+the same 1,950 organs measured two ways. `derive_rotated_corpus` performs that re-measurement
+and fails if a re-measured centroid does not reproduce the stored one.
+
+The rotation is **declared** from construction rather than taken from principal axes: a
+chamber is nearly an ellipsoid of revolution, so its second and third principal axes are
+decided by sampling noise and the target would be a coin flip. An annulus or a vessel takes
+its own construction axis as the frame's third row; everything else takes the organ-to-scene
+rotation built from the arrangement's yaw, pitch and roll. Rotation is therefore
+hierarchy-conditioned, and it follows the arrangement — which is what the held-out splits hold
+out, so the compositional hold-out carries over to rotation rather than being assumed to.
+
+The corpus has its own placement-blind floor, per split and per component. **0.1605 is not
+its bar.** Position, rotation and scale each have one, and the four splits' rotation floors —
+22.65°, 22.54°, 35.95°, 26.10° — are not interchangeable.
+
+## The integrity gate runs before training
+
+Parent-relative placement fails quietly: a wrong parent, a child composed before its parent,
+or a rotation read transposed all still produce frames of the right shape and a falling
+loss. So `generation/neural/nn/placement_integrity.py` checks the metadata, and raises,
+before a run may start. `Step10Config.resolved` checks the declared tree before the model is
+built; `Step10Trainer` runs the full gate on a training batch and again, at evaluation, on
+every split. Five checks:
+
+* **source table against the generator** — every declared parent is an entity the
+  generator's own code builds that child from (an annulus from one of the two cavities it
+  sits between; a vessel from its anchor or from the annulus it starts on, recognised by
+  starting on that annulus's axis). Checking the table against a copy of itself would pass
+  a shuffled table; checking it against construction does not;
+* **slot table** — the model's table addresses the same entities as the declared tree,
+  catching the 20-entity versus 64-slot ordering hazard;
+* **order** — a permutation with every parent before its children;
+* **stored frames** — raw rotation vectors orthonormal and right-handed, read before the
+  model's Gram-Schmidt can silently repair them;
+* **round trip** — parent-relative targets compose back to the frames, both as stored and
+  after giving every slot a distinct real rotation. The second pass is required: every
+  rotation in this corpus is the identity, which is its own transpose, so a transposed
+  rotation is invisible on the stored frames.
+
+The gate saves and restores the Python, NumPy and torch generators, so it cannot move a
+result it guards. It cannot detect a rotation stored transposed *in the data* — that is still
+a valid rotation — and on this corpus the question does not arise; a rotated corpus will need
+a comparison against the generator's own record.
 
 ## What did not change
 
 The AWR source of truth, the entity axis, per-entity geometry tokens, the identity
 subspace, geometry correspondence, the lightweight relational mechanism, the whole-organ
-dataset, measured relationships, the persistent scene representation, the Step 9 metric,
-the Step 9 loss weights, and the corpus.
+dataset, measured relationships, the persistent scene representation, the Step 9 metric, and
+the Step 9 translation and scale loss weights.
+
+Change 1 additionally left the corpus untouched. Change 2 derives a new one, and changes two
+things in it and nothing else: entity frames carry measured rotations, and extents are
+measured on each frame's own axes because an oriented frame with world-axis extents would
+describe a box the entity does not occupy. The generator parameters, centroids, relationship
+graphs, presence, levels of detail and split assignment are the parent corpus's, verbatim.

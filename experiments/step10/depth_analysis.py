@@ -30,7 +30,7 @@ from awr.config import load_domain_config
 from awr.ontology import load_ontology
 from datasets.whole_organ.continuous_corpus import TEST_SPLITS, load_step8_split
 from datasets.whole_organ.hierarchy import ROOT, depth_of, parent_slots
-from generation.neural.nn.transforms import rotation_angle
+from experiments.step8.frame_metrics import position_error, rotation_error, scale_error
 from generation.neural.nn.whole_organ import WholeOrganBatchBuilder
 from training.whole_organ import WholeOrganLoader
 
@@ -57,6 +57,15 @@ def depth_analysis(
 ) -> dict[str, Any]:
     """Translation, scale and rotation error bucketed by hierarchy depth.
 
+    Depth is always read from ``hierarchy`` — the spatial tree by default — whatever target
+    the model was trained on, so depth 0 names the same ten entities in every cell and the
+    buckets are comparable across cells.
+
+    The per-entity errors are the Step 8 metric's own functions, not copies of them, and
+    each split also recomputes the headline the way :func:`evaluate_step8` does — a mean of
+    per-batch means — as ``headline_translation_error``. A caller that compares it with the
+    headline has proved the buckets partition the same frames the headline scored.
+
     Placement is always inferred here. Supplying true frames would make the deeper buckets
     look like the shallow ones, because the cascade is exactly what the true frames remove.
     """
@@ -73,6 +82,7 @@ def depth_analysis(
         buckets: dict[int, dict[str, list[float]]] = defaultdict(
             lambda: {"position": [], "scale": [], "rotation": []}
         )
+        batch_means: list[float] = []
         for whole in loader.epoch(0):
             batch = whole.batch.to(target)
             present = batch.entity_present.bool()
@@ -91,9 +101,11 @@ def depth_analysis(
                     "be depth-analysed"
                 )
             truth = batch.entity_frames
-            position = (predicted[..., 0:3] - truth[..., 0:3]).norm(dim=-1)
-            scale = (predicted[..., 3:6] - truth[..., 3:6]).abs().mean(dim=-1)
-            rotation = rotation_angle(predicted, truth)
+            position = position_error(predicted, truth)
+            scale = scale_error(predicted, truth)
+            rotation = rotation_error(predicted, truth)
+            if bool(present.any()):
+                batch_means.append(float(position[present].mean()))
             for slot in range(present.shape[1]):
                 mask = present[:, slot]
                 if not bool(mask.any()):
@@ -103,19 +115,24 @@ def depth_analysis(
                 bucket["scale"].extend(scale[mask, slot].tolist())
                 bucket["rotation"].extend(rotation[mask, slot].tolist())
         out["splits"][split] = {
-            str(depth): {
-                "entities_scored": len(values["position"]),
-                "position_error": float(np.mean(values["position"])),
-                "scale_error": float(np.mean(values["scale"])),
-                "rotation_error": float(np.mean(values["rotation"])),
-            }
-            for depth, values in sorted(buckets.items())
+            "headline_translation_error": float(np.mean(batch_means)),
+            "depths": {
+                str(depth): {
+                    "entities_scored": len(values["position"]),
+                    "position_error": float(np.mean(values["position"])),
+                    "scale_error": float(np.mean(values["scale"])),
+                    "rotation_error": float(np.mean(values["rotation"])),
+                }
+                for depth, values in sorted(buckets.items())
+            },
         }
     out["notes"] = [
-        "Depth 0 is the built-in control: those entities are roots and are predicted "
-        "identically in the global and parent-relative cells.",
-        "A difference at depth 0 between two cells means the run drifted, not that the "
-        "hierarchy worked.",
+        "Depth is read from the spatial tree for every cell, so depth 0 names the same "
+        "entities whatever the model was trained on.",
+        "Depth 0 is the built-in control: those entities are roots, and their target is "
+        "identical in the global and parent-relative cells.",
+        "Buckets pool entities; headline_translation_error is the Step 9 mean of per-batch "
+        "means, recomputed here so the two can be checked against each other.",
         "Placement is inferred, never supplied; supplying frames removes the cascade "
         "the deeper buckets exist to measure.",
     ]

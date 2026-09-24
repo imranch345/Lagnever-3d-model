@@ -39,7 +39,12 @@ import torch
 
 from awr.config import load_domain_config
 from awr.ontology import load_ontology
-from datasets.whole_organ.continuous_corpus import TEST_SPLITS, load_step8_split
+from datasets.whole_organ.continuous_corpus import (
+    TEST_SPLITS,
+    load_step8_manifest,
+    load_step8_split,
+)
+from generation.neural.nn.geometry import frame_rotation
 from generation.neural.nn.placement import HierarchicalPlacement
 from generation.neural.nn.transforms import rotation_angle
 from generation.neural.nn.whole_organ import WholeOrganBatchBuilder
@@ -72,6 +77,33 @@ def _batches(
         yield whole.batch.entity_frames.double(), whole.batch.entity_present.bool()
 
 
+def _mean_rotation(frames: torch.Tensor) -> torch.Tensor:
+    """The chordal mean rotation of a set of frames, as two basis rows.
+
+    Averaging the six stored numbers and re-orthonormalising would be the obvious thing and
+    is wrong twice over. It is not the mean of the rotations, and when a set of rotations is
+    widely spread the averaged rows can cancel to nearly zero, at which point Gram-Schmidt
+    divides by its own epsilon and returns an arbitrary frame. Projecting the averaged
+    matrix onto SO(3) is the Fréchet mean under the chordal metric, which is the estimator
+    an identity-only predictor should be given: a floor that is worse than it needs to be
+    flatters every model measured against it.
+
+    On a corpus whose rotations are all the identity this returns the identity, so the
+    Change 1 floor is unaffected.
+    """
+    matrices = frame_rotation(frames)
+    average = matrices.mean(dim=0)
+    left, _, right = torch.linalg.svd(average)
+    projected = left @ right
+    if float(torch.linalg.det(projected)) < 0.0:
+        # Reflection rather than rotation: flip the least significant singular direction.
+        left = left.clone()
+        left[:, -1] = -left[:, -1]
+        projected = left @ right
+    rows: torch.Tensor = projected[:2].reshape(-1)
+    return rows
+
+
 def _fit(
     corpus_dir: str | Path,
     builder: WholeOrganBatchBuilder,
@@ -79,7 +111,11 @@ def _fit(
     *,
     parent_relative: bool,
 ) -> dict[int, torch.Tensor]:
-    """Per-entity mean frame over the training split: identity and nothing else."""
+    """Per-entity mean frame over the training split: identity and nothing else.
+
+    Position and log scale are arithmetic means; the rotation is the chordal mean. Nothing
+    here sees a relation, a hierarchy, a scene or a split other than ``train``.
+    """
     collected: dict[int, list[torch.Tensor]] = defaultdict(list)
     for frames, present in _batches(corpus_dir, "train", builder):
         source = placement.to_local(frames, present).local if parent_relative else frames
@@ -88,7 +124,11 @@ def _fit(
                 collected[int(slot)].append(source[row, slot])
     if not collected:
         raise ValueError("No frames to fit a placement floor on.")
-    return {slot: torch.stack(values).mean(dim=0) for slot, values in collected.items()}
+    out: dict[int, torch.Tensor] = {}
+    for slot, values in collected.items():
+        stacked = torch.stack(values)
+        out[slot] = torch.cat([stacked[:, 0:6].mean(dim=0), _mean_rotation(stacked)])
+    return out
 
 
 def _score(
@@ -165,6 +205,7 @@ def placement_floor(
         domain.domain.ontology_dir, expected_version=domain.domain.ontology_version
     )
     builder = WholeOrganBatchBuilder(ontology, domain)
+    manifest = load_step8_manifest(corpus_dir)
     frames, _ = next(_batches(corpus_dir, "train", builder))
     placement = HierarchicalPlacement(
         dict(builder.slot_of), slots=frames.shape[1], hierarchy=hierarchy
@@ -175,6 +216,16 @@ def placement_floor(
 
     report: dict[str, Any] = {
         "corpus_dir": str(corpus_dir),
+        "corpus_id": manifest.corpus_id,
+        "parent_corpus_id": manifest.parent_corpus_id,
+        "format_version": manifest.format_version,
+        "rotation_enabled": manifest.rotation_enabled,
+        "generator_version": manifest.generator_version,
+        "corpus_random_seed": manifest.random_seed,
+        "evaluation_loader": (
+            "WholeOrganLoader, batch 16, seed 0, shuffle off, drop_last off — the evaluation "
+            "path, because a floor iterated off the corpus scores a different entity set"
+        ),
         "hierarchy": hierarchy,
         "convention": placement.convention,
         "fitted_on": "train",
@@ -183,11 +234,24 @@ def placement_floor(
         ),
         "splits": {},
         "notes": [
-            "global must reproduce Step 9 exactly; the check is asserted, not eyeballed.",
-            "parent_relative is THE Step 10 floor: blind in the parent as well as the child.",
+            "parent_relative is the parent-relative floor: blind in the parent as well as "
+            "the child.",
             "parent_relative_oracle leaks the true parent and is a diagnostic, not a floor.",
-            "rotation_error is structurally zero: the corpus rotation target is a constant "
-            "identity, which Change 2 is what changes.",
+            *(
+                [
+                    "This corpus carries measured rotations, so rotation_error is a real "
+                    "number and the Step 9 floor of 0.1605 is NOT its bar: that floor "
+                    "belongs to the identity-rotation corpus and the two are separate "
+                    "tracks.",
+                ]
+                if manifest.rotation_enabled
+                else [
+                    "global must reproduce Step 9 exactly; the check is asserted, not "
+                    "eyeballed.",
+                    "rotation_error is structurally zero: this corpus's rotation target is "
+                    "a constant identity.",
+                ]
+            ),
         ],
     }
     for split in splits:
@@ -213,8 +277,15 @@ def placement_floor(
         base = entry["global"]["position_error"]
         entry["target_change_blind"] = (base - blind) / base
         entry["target_change_with_true_parent"] = (base - oracle) / base
+        # The Step 9 reproduction check belongs to the identity-rotation lineage only.
+        # Applying it to a rotated corpus would report a meaningless failure and invite
+        # exactly the cross-corpus comparison that is not valid.
         expected = STEP9_POSITION_FLOOR.get(split)
-        if expected is not None:
+        if manifest.rotation_enabled:
+            entry["step9_comparison"] = (
+                "not applicable: a different corpus with a different placement distribution"
+            )
+        elif expected is not None:
             entry["reproduces_step9"] = abs(base - expected) < 5e-4
         report["splits"][split] = entry
     return report

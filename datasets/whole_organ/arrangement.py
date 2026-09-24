@@ -47,6 +47,7 @@ import numpy as np
 __all__ = [
     "Arrangement",
     "ARRANGEMENT_FIELDS",
+    "axis_ranges",
     "SplitName",
     "SPLIT_RULES",
     "sample_arrangement",
@@ -85,6 +86,14 @@ _RANGES: Mapping[str, tuple[float, float]] = {
     "apex_swing": (-0.18, 0.18),
     "chamber_asymmetry": (-0.22, 0.22),
 }
+
+def axis_ranges() -> dict[str, tuple[float, float]]:
+    """Full sampling range of each continuous axis, before any split rule applies.
+
+    A copy, so a caller recording it in a corpus manifest cannot edit the sampler.
+    """
+    return dict(_RANGES)
+
 
 #: Boundaries of the held-out regions. Fixed here, before any Step 8 run.
 YAW_INTERPOLATION_HOLE: tuple[float, float] = (0.15, 0.25)
