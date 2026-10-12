@@ -1,10 +1,11 @@
 # ADR-STEP10-003: Rotation is descended as a chordal distance and reported as an angle
 
-**Status:** ACCEPTED
+**Status:** ACCEPTED, with corrections recorded under Amendments after Steps 10 and 14
 **Date:** Step 10, Change 2
 **Relates to:** `training/step10.py`, `generation/neural/nn/transforms.py`,
 `experiments/step10/calibrate_rotation_weight.py`, `experiments/step10/rotation_metrics.py`,
-`tests/test_step10_rotation_loss.py`
+`tests/test_step10_rotation_loss.py`, `training/step8.py`, `generation/neural/nn/losses.py`,
+`experiments/step10/run_change2.py`
 
 ## Context
 
@@ -86,3 +87,53 @@ Two consequences follow, both named in the Change 2 report and neither taken her
   non-degenerate;
 * a rotation-weight study must run on `train` and `validation` only, before rotation
   learning is judged.
+
+## Amendments
+
+Added after Step 14. The decision is unchanged. Three statements above no longer describe
+the code that ran, so they are corrected here rather than rewritten, which keeps the
+original reasoning readable.
+
+### 1. The weight is 3.0, not 0.33
+
+Change 2 ran at the calibrated 0.33, and the study this ADR called for then ran on `train`
+and `validation` only. It screened 0.33, 1.0, 3.0 and 10.0 and froze **3.0**
+(`SCREENED_ROTATION_WEIGHT` in `experiments/step10/run_change2.py`). Every run from the
+Step 10 confirmatory matrix through Step 20 uses 3.0. See
+[STEP_10_ROTATION_WEIGHT_STUDY.md](../STEP_10_ROTATION_WEIGHT_STUDY.md).
+
+### 2. There are two frame terms, not one
+
+"Everything else in the Step 8 frame loss is preserved" reads as though the chordal term
+became the only rotation penalty. It did not. The chordal term lives in the trainer's frame
+loss, `Step10Trainer._frame_loss`, which `Step8Trainer.train_step` adds outside the loss
+module. The loss module's own `entity_frame` term (`_frame` in
+`generation/neural/nn/losses.py`) stays live at weight 0.5:
+
+```
+total = loss-module terms, including
+          0.5 * entity_frame     # (L1 on translation and log-scale
+                                 #  + 0.5 * L1 on the six rotation numbers) / 6
+      + 2.0 * (translation + 0.5 * scale + 3.0 * chordal)    # frame_weight * _frame_loss
+      + 0.5 * nested_lod
+```
+
+So the six-number absolute difference this ADR rejected is still descended, at a small
+weight. Step 14 measured `entity_frame` at 3.1% of the total objective on the frozen A3
+checkpoints. Both terms are active in every chordal run, Step 10 Change 2 through Step 20, so
+no comparison between those runs is affected. Removing the older term is a candidate for the
+next study that changes the loss; it has not been removed.
+
+The docstring on `Step10Trainer._frame_loss`, which says the chordal objective "replaces only
+the rotation term", is accurate for that function and is left as it is.
+
+### 3. The effective rotation coefficient is 6.0
+
+λ = 3.0 is the coefficient inside `_frame_loss`, which `train_step` then multiplies by
+`frame_weight = 2.0`. Against the other terms of the total objective, rotation therefore
+carries 6.0. Every report's "λ = 3.0" is correct as the inner coefficient. The calibration
+rule above is unaffected: it is a ratio of terms inside `_frame_loss`, and the outer weight
+scales both. Step 14 measured rotation at 16.8% of the total objective at this setting.
+
+Source: [Step 14 report, §3.1](../STEP_14_OBJECTIVE_DIAGNOSTIC_REPORT.md), checked against
+`training/step8.py`, `training/step10.py` and `generation/neural/nn/losses.py`.
