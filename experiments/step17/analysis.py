@@ -1,4 +1,4 @@
-"""Step 17: does anything move before seed 9 escapes, at 5-step resolution?
+"""Step 17: whether anything moves before seed 9 escapes, at 5-step resolution.
 
 Step 16 localised the escape to a single 50-step interval and found nothing moving beforehand,
 leaving one objection: a precursor lasting a few dozen steps would have been invisible. This
@@ -47,8 +47,22 @@ SIGMA = 3.0
 #: Dense checkpoints a departure must persist across (itself plus the next two = 15 steps).
 PERSISTENCE = 3
 
-#: Series that are functions of the graph-usage calculation, and so cannot be its precursor.
-DERIVED_FROM_GRAPH_USAGE = {"graph_usage_deg"}
+#: Series that cannot be a precursor to the transition because they *are* the transition.
+#:
+#: Graph usage is ``rotation_without_graph - rotation_intact``, so ``validation_rotation_deg``
+#: is one of its two terms and ``relational_subset_deg`` is that same term restricted to a
+#: subset. A rotation series crossing its detection threshold before usage crosses the 1.5
+#: degree classification threshold is the one transition seen through two variables, not a
+#: precursor to it -- falsification check five exists precisely to catch that. The brief is
+#: explicit: a quantity moving with graph usage and geometry is part of the transition.
+DERIVED_FROM_GRAPH_USAGE = {
+    "graph_usage_deg",
+    "validation_rotation_deg",
+    "relational_subset_deg",
+}
+
+#: Classes that could carry a genuine precursor: upstream of the prediction, not the prediction.
+PRECURSOR_CLASSES = ("representation", "gradient", "objective")
 
 
 def _dense(values: dict[int, float], window: tuple[int, int], every: int = 5) -> dict[int, float]:
@@ -117,18 +131,30 @@ def _first_change(
     }
 
 
-def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path) -> dict[str, Any]:
-    """The whole Step 17 analysis."""
+def analyse(
+    *,
+    dense_path: Path,
+    frozen_escaper: Path,
+    frozen_non_escaper: Path,
+    window: tuple[int, int] = WINDOW,
+    baseline: tuple[int, int] = BASELINE,
+    reproduction_steps: Sequence[int] = (750, 800, 850, 900, 1200),
+) -> dict[str, Any]:
+    """The whole analysis, for any declared window and preceding baseline.
+
+    Step 18 reuses this with a different window, so the two steps cannot drift apart in how
+    they detect a change, exclude a candidate or classify a case. The defaults are Step 17's.
+    """
     dense_report = json.loads(dense_path.read_text(encoding="utf-8"))
     trajectory = dense_report["trajectory"]
     frozen = json.loads(frozen_escaper.read_text(encoding="utf-8"))["trajectory"]
     other = json.loads(frozen_non_escaper.read_text(encoding="utf-8"))["trajectory"]
 
     usage = _series(trajectory, "graph_usage_deg")
-    escape = _escape(_dense(usage, WINDOW))
+    escape = _escape(_dense(usage, window))
 
     changes = {
-        name: _first_change(_series(trajectory, name), BASELINE, WINDOW)
+        name: _first_change(_series(trajectory, name), baseline, window)
         for name in SERIES
         if _series(trajectory, name)
     }
@@ -136,7 +162,7 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
     # ---- reproduction against the frozen Step 16 run, at shared checkpoints ----
     frozen_series = {name: _series(frozen, name) for name in SERIES}
     reproduction = {}
-    for step in (750, 800, 850, 900, 1200):
+    for step in reproduction_steps:
         row: dict[str, Any] = {}
         for name in ("validation_rotation_deg", "graph_usage_deg", "relational_subset_deg"):
             new = _series(trajectory, name).get(step)
@@ -158,7 +184,9 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
         step = change["step"]
         before_escape = permanent is not None and step < permanent
         series_here = _series(trajectory, name)
-        pre_window = [v for s, v in series_here.items() if s <= WINDOW[0]]
+        # The declared baseline, not every earlier step: including the initial convergence
+        # transient would make almost any later value look like a standing offset.
+        pre_window = [v for s, v in series_here.items() if BASELINE[0] <= s <= BASELINE[1]]
         non_escaper = _first_change(_series(other, name), BASELINE, WINDOW)
         checks = {
             "occurs_before_escape": bool(before_escape),
@@ -185,7 +213,6 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
             ),
         }
 
-    survivors = sorted(name for name, entry in candidates.items() if entry["survives"])
     geometry = [
         name
         for name in ("validation_rotation_deg", "relational_subset_deg")
@@ -193,10 +220,10 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
     ]
     classes = {
         "representation": [
-            n
-            for n in changes
-            if n.startswith(("context_", "entity_latent", "relation_bias", "frame_"))
-            and changes[n]["detected"]
+            name
+            for name in changes
+            if changes[name]["detected"]
+            and name.startswith(("context_", "entity_latent", "relation_bias", "frame_"))
         ],
         "gradient": [n for n in changes if n.startswith("grad_") and changes[n]["detected"]],
         "objective": [n for n in changes if n.startswith("obj_") and changes[n]["detected"]],
@@ -208,30 +235,47 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
         for label, names in classes.items()
     }
     ordered = sorted((step, label) for label, step in earliest.items() if step is not None)
-    if not survivors and ordered:
-        distinct = {step for step, _ in ordered}
-        pattern = (
-            "E — all measurable changes in the same 5-step interval"
-            if len(distinct) == 1
-            else ("D — graph usage and geometry with no surviving precursor")
-        )
-        case = "Case 3 — no signal" if len(distinct) == 1 else "Case 2 — transition signal"
-    elif survivors:
-        pattern = "a precursor precedes graph usage and geometry"
-        case = "Case 1 — true precursor"
+
+    # The transition is graph usage and geometry together; a precursor has to beat both.
+    transition_step = min(
+        (step for label, step in earliest.items() if label in ("graph_usage", "geometry") and step),
+        default=None,
+    )
+    # Only upstream classes are eligible. A rotation series is the transition seen again.
+    survivors = sorted(
+        name
+        for name, entry in candidates.items()
+        if entry["survives"]
+        and name not in DERIVED_FROM_GRAPH_USAGE
+        and transition_step is not None
+        and entry["first_change_step"] < transition_step
+    )
+    simultaneous = sorted(
+        name
+        for label in PRECURSOR_CLASSES
+        for name in classes[label]
+        if transition_step is not None and changes[name]["step"] == transition_step
+    )
+    if survivors:
+        case = "Case 1 - true precursor"
+        pattern = "an upstream quantity changed before graph usage and geometry"
+    elif simultaneous:
+        case = "Case 2 - transition signal"
+        pattern = "upstream quantities moved with the transition, not before it"
     else:
-        pattern = "no change detected at all"
-        case = "Case 3 — no signal"
+        case = "Case 3 - no signal"
+        pattern = "D - graph usage and geometry moved with no upstream precursor detected"
 
     return {
         "experiment_id": "step17-high-resolution-escape",
         "status": "diagnostic; single run; correlational, no causal claim",
         "preregistration": "docs/STEP_17_HIGH_RES_ESCAPE_PLAN.md",
         "test_splits_read": [],
-        "window": list(WINDOW),
+        "seed": dense_report.get("seed"),
+        "window": list(window),
         "dense_every": dense_report.get("dense_every"),
-        "dense_checkpoints": len(_dense(usage, WINDOW)),
-        "baseline": list(BASELINE),
+        "dense_checkpoints": len(_dense(usage, window)),
+        "baseline": list(baseline),
         "criterion": (
             f"first dense checkpoint more than {SIGMA} pre-window baseline standard deviations "
             f"from the baseline mean, sustained across {PERSISTENCE} dense checkpoints"
@@ -241,7 +285,9 @@ def analyse(*, dense_path: Path, frozen_escaper: Path, frozen_non_escaper: Path)
         "reproduction": reproduction,
         "first_change": changes,
         "earliest_change_by_class": earliest,
+        "transition_step": transition_step,
         "observed_order": [label for _, label in ordered],
+        "upstream_moving_with_transition": simultaneous,
         "candidates": candidates,
         "surviving_candidates": survivors,
         "pattern": pattern,
@@ -269,14 +315,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--non-escaper", type=Path, default=Path("experiments/runs/step16/trajectory_seed5.json")
     )
     parser.add_argument("--out", type=Path, default=Path("experiments/runs/step17/analysis.json"))
+    parser.add_argument("--window", type=int, nargs=2, default=list(WINDOW))
+    parser.add_argument("--baseline", type=int, nargs=2, default=list(BASELINE))
+    parser.add_argument(
+        "--reproduction-steps", type=int, nargs="+", default=[750, 800, 850, 900, 1200]
+    )
     args = parser.parse_args(argv)
     report = analyse(
-        dense_path=args.dense, frozen_escaper=args.frozen, frozen_non_escaper=args.non_escaper
+        dense_path=args.dense,
+        frozen_escaper=args.frozen,
+        frozen_non_escaper=args.non_escaper,
+        window=(args.window[0], args.window[1]),
+        baseline=(args.baseline[0], args.baseline[1]),
+        reproduction_steps=args.reproduction_steps,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    print(f"dense checkpoints in {WINDOW}: {report['dense_checkpoints']}")
+    print(f"seed {report['seed']}, window {report['window']}, baseline {report['baseline']}")
+    print(f"dense checkpoints: {report['dense_checkpoints']}")
     print(f"reproduces frozen seed 9 at shared checkpoints: {report['reproduces_frozen_seed9']}")
     print(f"\nescape: {report['escape']['interval']}")
     print(f"transient crossings: {report['escape']['transient_crossings']}")
