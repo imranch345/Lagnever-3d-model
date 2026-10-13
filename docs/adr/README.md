@@ -50,7 +50,9 @@ the headline condition, and the nested level-of-detail objective.
 Step 10 records four. The first two are design decisions taken before Change 1 ran — where the
 spatial parent table comes from, and why a parent contributes an isotropic scale rather than
 its full one. The third is Change 2's rotation objective: what is descended, what is reported,
-and how the weight was chosen without touching a test split. The fourth records how a result
+and how the weight was chosen without touching a test split. It was amended after Step 14 to
+record the frozen weight of 3.0 and the older frame term that stays live beside it. The fourth
+records how a result
 must be read — that a parent-relative local frame is not a portable local transform — and,
 like ADR-0018 and ADR-0019, it changes no code and exists because a measurement contradicted
 an intuition two experiments had been built on.
