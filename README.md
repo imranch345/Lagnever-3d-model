@@ -2,15 +2,17 @@
 
 **R&D prototype. Step 4 built the deterministic foundation, Step 5 designed the neural
 architecture, Step 6 implemented it and ran the first controlled experiment, Step 7
-stress-tested the representation to find out which parts are actually necessary, and
-Step 8 removed the teacher-forced placement that made the relational question unanswerable.
-Results are on synthetic data only and make no medical claim.**
+stress-tested the representation to find out which parts are actually necessary,
+Step 8 removed the teacher-forced placement that made the relational question unanswerable,
+Steps 9 and 10 found what limits placement and showed rotation can be learned above its
+floor, and Steps 11 to 20 traced why the model uses so little of the relational
+information it is given. Results are on synthetic data only and make no medical claim.**
 
 Lagnav 3D is a research project aiming at a *language-controlled 3D anatomical
 intelligence system*: you describe anatomy in words, and a structured, editable,
 anatomically meaningful 3D scene responds.
 
-This repository is **not** that system. It contains two things:
+This repository is **not** that system. It contains:
 
 1. **A working deterministic foundation** (Step 4): the Anatomical World
    Representation, the heart ontology, the command engine, persistent scene
@@ -25,6 +27,12 @@ This repository is **not** that system. It contains two things:
    perturbation experiments that damage one channel at a time, and persistent local
    editing. Step 7 also withdrew three earlier conclusions that turned out to rest on
    setups which could not test them.
+5. **Placement and rotation** (Steps 8–10): predicted rather than teacher-forced
+   placement, a placement-blind floor, a rotated corpus with floors of its own, and a
+   rotation objective that clears them.
+6. **A relational diagnostic programme** (Steps 11–20): preregistered studies of where
+   relational information is lost, which ruled out four architectural and objective
+   explanations and isolated a seed-dependent transition in training.
 
 Nothing here calls a text-to-3D model, and no external model is part of the
 architecture. Where a research decision has not been made, the code contains a typed
@@ -38,6 +46,12 @@ interface and a `TODO`, not an invented answer.
 * Step 8 architecture: **[docs/STEP_8_ARCHITECTURE.md](docs/STEP_8_ARCHITECTURE.md)**
 * Placement learning: **[docs/STEP_9_COMPLETION_REPORT.md](docs/STEP_9_COMPLETION_REPORT.md)**
 * Step 9 architecture: **[docs/STEP_9_ARCHITECTURE.md](docs/STEP_9_ARCHITECTURE.md)**
+* Step 10 architecture: **[docs/STEP_10_ARCHITECTURE.md](docs/STEP_10_ARCHITECTURE.md)**
+* Parent-relative placement: **[docs/STEP_10_CHANGE1_REPORT.md](docs/STEP_10_CHANGE1_REPORT.md)**
+* Rotated corpus and rotation learning: **[corpus](docs/STEP_10_CHANGE2_CORPUS_REPORT.md)**,
+  **[training](docs/STEP_10_CHANGE2_TRAINING_REPORT.md)**,
+  **[rotation weight study](docs/STEP_10_ROTATION_WEIGHT_STUDY.md)**
+* Relational diagnostics, Steps 11–20: one report per step, linked from the table below
 * Decision records: [docs/adr/](docs/adr/)
 
 ### What Step 7 changed about how to read Step 6
@@ -50,6 +64,53 @@ not have come out any other way. It was untestable, not refuted.
 Step 7 rebuilt the data so the question is answerable, and found four further defects of
 the same kind before any conclusion could be drawn. The details are in
 [docs/step7/02_preregistration_amendments.md](docs/step7/02_preregistration_amendments.md).
+
+### Steps 11 to 20, in one table
+
+Step 10 left a gap. A lookup keyed on entity identity **and** the relationship graph reaches
+11.57° of rotation error on `test_seen`; A3, reading the same inputs, reaches 21.38°. Steps
+11 to 20 asked where that relational information is lost.
+
+| step | question | answer |
+| --- | --- | --- |
+| [11](docs/STEP_11_RELATIONAL_INFORMATION_REPORT.md) | Where between graph and frame is the signal lost? | Only removing the whole graph matters (+1.83°). Shuffling relation types moves rotation by 0.0003°: the typed graph is typed in name only. |
+| [12](docs/STEP_12_RELATION_CONDITIONED_VALUES_REPORT.md) | Does giving each relation its own message help? | No. 21.80° → 21.81° on validation, against a 1.0° threshold. |
+| [13](docs/STEP_13_GRAPH_DEPTH_GLOBAL_CONTEXT_REPORT.md) | Is it propagation depth, or missing global context? | Neither. `test_seen`: A3 21.38°, deeper 21.99°, global context 21.44°. |
+| [14](docs/STEP_14_OBJECTIVE_DIAGNOSTIC_REPORT.md) | Does the objective ask for relations? | Yes. Graph conditioning reduces its rotation term by 82.2%, so the objective is not the bottleneck. |
+| [15](docs/STEP_15_SEED_MODE_REPORT.md) | Is the seed variance real? | Bimodal on ten seeds: 6 use the graph (~21°), 3 do not (~23.5°), 1 is intermediate. |
+| [16](docs/STEP_16_ESCAPE_TRIGGER_REPORT.md) | What precedes a seed's escape into graph use? | Nothing measurable at 50-step resolution; the escape falls inside one interval. |
+| [17](docs/STEP_17_HIGH_RES_ESCAPE_REPORT.md) | Is there a precursor at 5-step resolution? | No upstream precursor. Its reported 60-step usage lead is withdrawn by Step 18. |
+| [18](docs/STEP_18_ONSET_AND_REPLICATION_REPORT.md) | Does that lead survive a dense baseline and a second seed? | No. The transition spans steps 810–820, and the null replicates on seed 3. |
+| [19](docs/STEP_19_GRADIENT_DIRECTION_REPORT.md) | Does the gradient's direction change first? | No. Successive gradients stay aligned at +0.844 and nearly orthogonal to the net displacement. |
+| [20](docs/STEP_20_CHECKPOINT_BRANCHING_REPORT.md) | From seed 9's step-805 state, does data ordering decide the outcome? | No. All 8 branches escape, at steps 830–840, to a final rotation of 20.988° ± 0.023°. |
+
+Two things follow. Every architectural and objective explanation tested has been ruled out,
+and the escape is already fixed in the model's state before any trajectory measurement sees
+it coming. And escape is not the whole gap: on validation a graph-using seed still sits near
+21° against the lookup's 12.24°, and A3, averaged over three seeds, captures 15.2% of the
+available relational improvement.
+
+**Next, not started:** Step 20's full-state checkpointing makes two experiments cheap.
+Branching seed 9 earlier (700, 600, 400) would find when the outcome is fixed, and branching
+a non-escaping seed would show whether that outcome is fixed too.
+
+### Step 10, in one table
+
+Step 10 changed what is predicted. **Change 1** predicted each entity's frame relative to its
+parent and placed worse than the global target in all five arms. **Change 2** built a rotated
+corpus (mean rotation 61.8°) with floors of its own, and at first no arm learned rotation
+above them. A weight study then showed why: the rotation term was 7% of the frame loss.
+At λ = 3.0, chosen on validation only, `test_seen`, rotation floor 22.65°:
+
+| arm | rotation | margin over floor | position (floor 0.1605) |
+| --- | --- | --- | --- |
+| A3 full typed graph | 21.38 ± 1.03 | +1.27 | 0.1561 |
+| A3Lite untyped graph | 22.64 ± 0.04 | +0.01 | 0.1597 |
+| A1 no graph | 22.74 ± 0.01 | −0.08 | 0.1674 |
+
+Rotation is learnable above the floor, and only A3 does it. The inputs carry far more: a
+lookup keyed on entity identity and the relationship graph reaches **11.57°**. That gap is
+what Steps 11 to 20 investigate.
 
 ### Step 9, in one line
 
@@ -134,8 +195,6 @@ The corollary the prototype is built to test: if the representation is right,
 persistent multi-turn editing ("show the chambers", then "make the left
 ventricle transparent", then "animate blood flow") falls out of it, and does so
 before any model is trained.
-
-# Lagnever-3d-model
 
 ## Why mesh-only generation is insufficient
 
@@ -259,6 +318,16 @@ The rest of the body is explicitly out of scope.
 | **Step 9** frame decomposition                         | Implemented; rotation shown to be structurally zero under the current target |
 | **Step 9** scene context and objective alignment       | Implemented and tested; neither moved placement beyond seed noise |
 | **Step 9** verdict                                     | Placement is at the floor. The frame target, not the head, is the limiting factor |
+| **Step 10** parent-relative placement (Change 1)       | Implemented; placed worse than the global target in all five arms |
+| **Step 10** rotated corpus with its own floors (Change 2) | Implemented; 1,950 scenes, mean rotation 61.8°, checksummed and frozen |
+| **Step 10** chordal rotation objective and weight study | Implemented; λ = 3.0, chosen on validation only |
+| **Step 10** verdict                                    | Rotation beats its floor on held-out data, in A3 only (+1.27° on `test_seen`) |
+| **Step 11** graph ablations and latent probes          | Run; only removing the whole graph matters, relation types are inert |
+| **Steps 12–14** relation-conditioned values, depth, global context, objective audit | Run; none explains the relational gap |
+| **Step 15** ten-seed study                             | Run; the outcome is bimodal, 6 of 10 seeds use the graph |
+| **Steps 16–19** escape-trigger instrumentation         | Implemented; no precursor at any resolution, nor in gradient direction |
+| **Step 20** full-state checkpointing and exact branching | Implemented and tested; model, AdamW state, step counter and stream position |
+| **Step 20** verdict                                    | State-dominated: 8 of 8 branches from step 805 escape |
 
 ### Deliberately not implemented
 
@@ -365,14 +434,17 @@ geometry/     3D representation, entity-to-geometry correspondence, decoder inte
 generation/   Language encoder, anatomical reasoner, scene generator, neural interfaces
 animation/    Semantic cardiac flow and conduction model
 evaluation/   Anatomy coverage, geometry checks, consistency, benchmarks
-datasets/     Dataset schema, licensing policy, synthetic example
+datasets/     Dataset schema, licensing policy, synthetic example, synthetic and
+              whole-organ corpus generators
 ontology/     Versioned ontology data (Heart Ontology v0.1)
 configs/      Domain configuration, the (empty) model configuration, neural experiment configs
-experiments/  Runnable demonstrations and the pre-registered heart experiment
-docs/         Architecture decisions and the Step 5 neural design document
+experiments/  Runnable demonstrations, the pre-registered heart experiment, and the
+              runners for Steps 7 to 20
+docs/         Architecture decisions, the Step 5 neural design document, and the
+              reports for Steps 6 to 20
 training/     Training loop, run manifests, command line
 visualization/ Dependency-free exporters and research views
-tests/        462 tests
+tests/        1024 tests
 ```
 
 Dependency direction is one-way: `awr` depends on nothing above it, and the test
@@ -381,7 +453,7 @@ suite enforces that along with the "standard library plus PyYAML" rule.
 ## Running tests
 
 ```bash
-pytest                       # 462 tests with the prototype extra, 375 without
+pytest                       # 1024 tests with the prototype extra
 pytest tests/test_command_engine.py -v
 pytest -k resolver
 pytest -m "not slow"         # skip the end-to-end training smoke test
@@ -443,10 +515,9 @@ The ablations also falsified part of the Step 5 reasoning. The typed graph encod
 corpus; the entity axis and per-entity fields carry the effect. That is written up in
 the experiment report rather than smoothed over.
 
-**Next: Step 7.** The evidence points at per-entity factorisation rather than at
-relational reasoning, so the next experiment should test the graph encoder on a task
-that genuinely needs relations, and replicate the main result on data that was not
-generated per entity.
+**Steps 7 to 20 followed**, and the summaries at the top of this file record what each
+found. The open question now is why a model handed the relationship graph captures so
+little of what it carries; the next experiments are listed under Steps 11 to 20 above.
 
 ## Status of the anatomy
 
