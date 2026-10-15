@@ -39,6 +39,7 @@ __all__ = [
     "placement",
     "register",
     "rigid_to",
+    "topology",
 ]
 
 FloatArray = npt.NDArray[np.float64]
@@ -108,14 +109,31 @@ def rigid_to(
 
 
 def make_template(mesh: trimesh.Trimesh, faces: int = 2000) -> trimesh.Trimesh:
-    """The reference entity, decimated to a face budget, as the template to deform."""
+    """The reference entity, decimated to a face budget, as the template to deform.
+
+    Only the largest connected piece is kept. Decimation can leave two-face slivers beside
+    the surface (found on the real left ventricle, 2026-10-16), and every sample drawn from a
+    template with a sliver would fail the quality report as not watertight and in two pieces.
+    """
     template = (
         mesh.simplify_quadric_decimation(face_count=faces)
         if len(mesh.faces) > faces
         else mesh.copy()
     )
+    pieces = template.split(only_watertight=False)
+    if len(pieces) > 1:
+        template = max(pieces, key=lambda piece: len(piece.faces))
     template.remove_unreferenced_vertices()
     return template
+
+
+def topology(mesh: trimesh.Trimesh) -> dict[str, int | bool]:
+    """Faces, closedness and Euler number (2 for a sphere-like surface; 0 has one handle)."""
+    return {
+        "faces": len(mesh.faces),
+        "watertight": bool(mesh.is_watertight),
+        "euler": int(mesh.euler_number),
+    }
 
 
 def placement(

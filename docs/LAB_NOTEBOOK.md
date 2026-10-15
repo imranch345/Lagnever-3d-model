@@ -207,3 +207,18 @@ of the frozen protocol.
     5 mm from the fit.
   - **Covered by a test.** A target 40 mm beyond reach fails without placement and fits with
     it.
+- **Template check, before the build.**
+  - **Problem.** Decimating the real left ventricle left a two-face sliver beside its surface.
+    Every generated LV would then have failed the quality report as "not watertight, 2
+    pieces".
+  - **Fix.** Templates now keep only their largest piece. All seven are closed surfaces.
+  - **Topology is reported, not hidden.** The build report records each template's faces,
+    closedness and Euler number. The LV has a pinch (Euler 1) and the right lung one handle
+    (Euler 0); a sphere-like surface would have 2. Both come from the reference subject's
+    surface, and both are listed as limits.
+- **Honest validity needs checks that can fail.** A deformed template is closed and in one
+  piece by construction, so the Level 1 hard checks would pass almost every sample and say
+  little. The validity sweep therefore adds checks that can fail:
+  - folding;
+  - overlap between entities;
+  - volume against the training range.

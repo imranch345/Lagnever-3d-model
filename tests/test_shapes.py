@@ -113,6 +113,18 @@ class TestRegistration:
         assert len(vertices) == len(template.vertices)
         assert error["mean_from_target"] < 1.0 and error["mean_to_target"] < 1.0
 
+    def test_a_template_keeps_only_its_largest_piece(self) -> None:
+        """A two-face sliver beside the surface is dropped, so samples can be one closed piece."""
+        from shapes.register import make_template, topology
+
+        sphere = trimesh.creation.icosphere(subdivisions=3, radius=20.0)
+        sliver = trimesh.Trimesh(
+            [[40.0, 0, 0], [41.0, 0, 0], [40.0, 1.0, 0]], [[0, 1, 2], [0, 2, 1]], process=False
+        )
+        template = make_template(trimesh.util.concatenate([sphere, sliver]), 400)
+        assert len(template.split(only_watertight=False)) == 1
+        assert topology(template) == {"faces": 400, "watertight": True, "euler": 2}
+
     def test_placement_reaches_a_target_beyond_the_threshold(self) -> None:
         """A 20 mm sphere onto a 60 mm-tall ellipsoid: 40 mm out of reach without placement."""
         from shapes.register import fit_error, make_template, placement, register

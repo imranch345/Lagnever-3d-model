@@ -42,6 +42,7 @@ from shapes.register import (
     make_template,
     register,
     rigid_to,
+    topology,
 )
 from shapes.ssm import ShapeModel, fit
 
@@ -192,6 +193,7 @@ def build_models(
         train = {s: shapes[entity][s] for s in train_ids if s in shapes[entity]}
         held = {s: shapes[entity][s] for s in held_ids if s in shapes[entity]}
         entry: dict[str, Any] = {
+            "template": topology(templates[entity]),
             "registered": len(fits[entity]),
             "excluded": excluded[entity],
             "fit_mean_mm": round(
