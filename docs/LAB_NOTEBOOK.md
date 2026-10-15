@@ -196,3 +196,14 @@ of the frozen protocol.
 
   Such subjects are now excluded with the error, and not cached, so a rebuild retries them.
   Each registration also records its alignment cost, for later diagnosis. Covered by a new test.
+- **Lung registration probe, before the build** (`docs/evidence/2026-10-16_lung_registration_probe.md`).
+  - **Negative first.** With the settings validated on left ventricles, **4 of 6 real lungs
+    missed** the 2 mm fit, one at 17.9 mm. Non-rigid ICP reaches only 15 mm, and lungs vary
+    more than that.
+  - **Fix.** Per-axis placement before non-rigid ICP, plus a finer template (4000 faces) and
+    looser final stages for lungs only. Now **0 of 6 miss** (0.84–1.76 mm). Chambers are
+    unchanged at 0.21–0.50 mm.
+  - **Known limit.** 3–8% of each lung's surface (thin wedges and recesses) stays more than
+    5 mm from the fit.
+  - **Covered by a test.** A target 40 mm beyond reach fails without placement and fits with
+    it.

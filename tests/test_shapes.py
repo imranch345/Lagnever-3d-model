@@ -113,6 +113,22 @@ class TestRegistration:
         assert len(vertices) == len(template.vertices)
         assert error["mean_from_target"] < 1.0 and error["mean_to_target"] < 1.0
 
+    def test_placement_reaches_a_target_beyond_the_threshold(self) -> None:
+        """A 20 mm sphere onto a 60 mm-tall ellipsoid: 40 mm out of reach without placement."""
+        from shapes.register import fit_error, make_template, placement, register
+
+        template = make_template(trimesh.creation.icosphere(subdivisions=3, radius=20.0), 400)
+        target = trimesh.creation.icosphere(subdivisions=4, radius=1.0)
+        target.apply_scale([22.0, 60.0, 20.0])
+        target.apply_translation([5.0, 10.0, 0.0])
+        placed = template.copy()
+        placed.apply_transform(placement(template, target))
+        assert np.allclose(placed.extents, target.extents, rtol=0.05)
+        unplaced = fit_error(register(template, target, place=False), template.faces, target)
+        fitted = fit_error(register(template, target), template.faces, target)
+        assert unplaced["mean_from_target"] > 3.0
+        assert fitted["mean_from_target"] < 1.0
+
 
 def test_a_failing_subject_is_excluded_not_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -147,10 +163,10 @@ def test_a_failing_subject_is_excluded_not_fatal(
             raise RuntimeError("alignment diverged")
         return real_rigid(reference, moving, **kw)
 
-    def register(template: trimesh.Trimesh, target: trimesh.Trimesh) -> np.ndarray:
+    def register(template: trimesh.Trimesh, target: trimesh.Trimesh, **kw: object) -> np.ndarray:
         if abs(radius(target) - 13.0) < 0.5:
             raise ValueError("degenerate target")
-        return real_register(template, target)
+        return real_register(template, target, **kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr(build, "rigid_to", rigid)
     monkeypatch.setattr(build, "register", register)

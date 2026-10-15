@@ -6,7 +6,12 @@ rigid ICP: no scaling, because size is one of the things the shape model has to 
 same transform then applies to every entity of that subject.
 
 **Correspondence.** One template per entity, taken from the reference subject and decimated,
-is deformed onto each subject's surface with Amberg's optimal-step non-rigid ICP. Afterwards
+is first placed over the subject's entity by a per-axis scale and shift that matches their
+robust extents, then deformed onto its surface with Amberg's optimal-step non-rigid ICP. The
+placement matters for large, variable organs: non-rigid ICP only pulls towards surface within
+its distance threshold, and real lungs differ in height by more than that (probe of
+2026-10-16: without it, 4 of 6 lungs missed the 2 mm fit). The output stays in the aligned
+subject frame, so position and size remain in the shape. Afterwards
 vertex ``i`` is the same place on every subject. The fit is measured both ways (template to
 surface, surface to template) so a template that only covers part of the target cannot look
 good. Surface fit does not prove anatomical correspondence; it is the necessary part that can
@@ -27,9 +32,11 @@ from trimesh.registration import icp, nricp_amberg
 
 __all__ = [
     "DEFAULT_STEPS",
+    "LOOSE_STEPS",
     "fit_error",
     "load_scene",
     "make_template",
+    "placement",
     "register",
     "rigid_to",
 ]
@@ -43,6 +50,16 @@ DEFAULT_STEPS: tuple[tuple[float, float, float, int], ...] = (
     (0.02, 0.0, 0.5, 10),
     (0.03, 0.0, 0.5, 10),
     (0.01, 0.0, 0.0, 10),
+)
+
+#: For large, variable organs: the same stages, then two looser ones without normals, so the
+#: template reaches into wedges and recesses. Probe of 2026-10-16 (3 subjects, both lungs):
+#: mean surface fit 1.33-2.35 mm with the default stages at 2000 faces, 0.84-1.76 mm with these
+#: at 4000.
+LOOSE_STEPS: tuple[tuple[float, float, float, int], ...] = (
+    *DEFAULT_STEPS[:-1],
+    (0.005, 0.0, 0.0, 10),
+    (0.002, 0.0, 0.0, 10),
 )
 
 
@@ -101,16 +118,47 @@ def make_template(mesh: trimesh.Trimesh, faces: int = 2000) -> trimesh.Trimesh:
     return template
 
 
+def placement(
+    template: trimesh.Trimesh,
+    target: trimesh.Trimesh,
+    *,
+    samples: int = 4000,
+    seed: int = 0,
+) -> FloatArray:
+    """The per-axis scale and shift that lays ``template``'s extent over ``target``'s.
+
+    Extents are the 1st to 99th percentile of seeded surface samples per axis, so a stray
+    sliver does not stretch the template. Axis-aligned is enough because subjects are already
+    rigidly aligned to the reference.
+    """
+    a, _ = trimesh.sample.sample_surface(template, samples, seed=seed)
+    b, _ = trimesh.sample.sample_surface(target, samples, seed=seed + 1)
+    a_low, a_high = np.percentile(np.asarray(a), [1, 99], axis=0)
+    b_low, b_high = np.percentile(np.asarray(b), [1, 99], axis=0)
+    scale = (b_high - b_low) / np.maximum(a_high - a_low, 1e-6)
+    matrix = np.eye(4)
+    matrix[:3, :3] = np.diag(scale)
+    matrix[:3, 3] = b_low - a_low * scale
+    return matrix
+
+
 def register(
     template: trimesh.Trimesh,
     target: trimesh.Trimesh,
     *,
     steps: Sequence[Sequence[float]] = DEFAULT_STEPS,
     distance_threshold: float = 15.0,
+    place: bool = True,
 ) -> FloatArray:
-    """The template's vertices, deformed onto ``target``. Same order, same faces."""
+    """The template's vertices, deformed onto ``target``. Same order, same faces.
+
+    With ``place`` the template is first laid over the target (:func:`placement`).
+    """
+    source = template.copy()
+    if place:
+        source.apply_transform(placement(template, target))
     vertices = nricp_amberg(
-        template, target, steps=[list(s) for s in steps], distance_threshold=distance_threshold
+        source, target, steps=[list(s) for s in steps], distance_threshold=distance_threshold
     )
     return np.asarray(vertices, dtype=np.float64)
 
