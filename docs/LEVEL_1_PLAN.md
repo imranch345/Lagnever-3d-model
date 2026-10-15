@@ -178,3 +178,22 @@ which means a cost decision, and it starts only after Level 1 works end to end.
   The viewer then gained cardiac-cycle playback, which plays the engine's semantic clip slower
   than life.
 * **`AnatomyType` stays frozen.** The research feature extractor sizes an input from it.
+
+### What the first real subjects taught the checks
+
+The first build of 20 real subjects (TotalSegmentator v1, 32.6 MB fetched) passed none of the
+quality checks. Reading the reasons showed two errors in the checks, not in the data:
+
+* **Chamber sides were judged against the heart's centre.** "Left" and "right" in chamber names
+  mean the two circulations. The heart is rotated: the right ventricle is anterior and reaches
+  left of the midline, and the left atrium is posterior and close to it. Every subject
+  "failed" for the left atrium. Chambers are now judged against their partner (left
+  ventricle left of right ventricle, left atrium left of right atrium), and lungs and lobes
+  against the body midline at the trachea. The phantom had hidden this because its chambers
+  were placed with the same naive idea.
+* **Watertightness was measured after decimation.** Full-resolution lung surfaces are closed;
+  decimating to 20,000 faces opened small holes. Quality is now measured before decimation,
+  and the display mesh's own closure is recorded as information only.
+
+Several subjects still fail for genuine reasons: scans cut above the heart, and structures
+missing from the field of view.

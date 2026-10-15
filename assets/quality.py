@@ -7,8 +7,10 @@ would be worse than not checking.
 **Hard** -- a subject that fails any of these is not usable:
 
 * every mapped entity has a mesh;
-* every left and right entity lies on its own side of the heart;
-* every mesh is watertight, and its mask is one connected piece once specks below the
+* lungs and lobes lie on their own side of the body midline, and each left heart chamber lies
+  left of its right partner (``assets.meshes.side_report``);
+* every full-resolution surface is watertight (decimation for display may open holes and is
+  not judged), and its mask is one connected piece once specks below the
   pipeline's component fraction are ignored (a hollow myocardium counts as one);
 * no heart or lung structure touches a face of the scanned volume -- touching means the field
   of view cut it off. Cropped vessels and the trachea, which run out of the thorax by nature,

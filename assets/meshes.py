@@ -44,6 +44,7 @@ from awr.ontology import AnatomyOntology, load_ontology
 
 __all__ = [
     "RAS_TO_VIEWER",
+    "SIDE_PAIRS",
     "boundary_faces",
     "significant_pieces",
     "MeshParameters",
@@ -84,8 +85,10 @@ class MeshQuality:
     """Measured, not eyeballed."""
 
     faces: int
+    """Faces of the display mesh, after decimation."""
     vertices: int
     watertight: bool
+    """Of the full-resolution surface, before decimation."""
     components: int
     volume_ml: float | None
     centroid_mm: list[float]
@@ -94,6 +97,8 @@ class MeshQuality:
     touches_boundary: list[str] = field(default_factory=list)
     """Faces of the scanned volume the mask reaches (RAS+ names). A structure that touches the
     superior or inferior face was probably cut off by the scan's field of view."""
+    display_watertight: bool = True
+    """Whether the decimated display mesh is still closed; informational only."""
     voxel_components: int = 0
     """Connected pieces of the mask (6-connectivity) at least ``min_component_fraction`` of the
     largest. Unlike ``components``, which counts surfaces, a hollow structure such as the
@@ -166,20 +171,30 @@ def mask_to_mesh(
         mesh = trimesh.util.concatenate(kept)
 
     trimesh.smoothing.filter_taubin(mesh, iterations=parameters.smoothing_iterations)
+    trimesh.repair.fix_normals(mesh)
+    # Measured on the full-resolution surface. Decimation is for display and can open small
+    # holes (real lung lobes do: watertight before, not after), which says nothing about the
+    # segmentation. The display mesh's own watertightness is recorded separately.
+    watertight = bool(mesh.is_watertight)
+    components = len(mesh.split(only_watertight=False))
+    volume_ml = float(abs(mesh.volume)) / 1000.0 if watertight else None
+    centroid = [float(v) for v in mesh.centroid]
+    bounds = [[float(v) for v in row] for row in mesh.bounds]
     if len(mesh.faces) > parameters.max_faces:
         mesh = mesh.simplify_quadric_decimation(face_count=parameters.max_faces)
-    trimesh.repair.fix_normals(mesh)
+        trimesh.repair.fix_normals(mesh)
+        notes.append("decimated for display")
 
-    watertight = bool(mesh.is_watertight)
     return mesh, MeshQuality(
         faces=len(mesh.faces),
         vertices=len(mesh.vertices),
         watertight=watertight,
-        components=len(mesh.split(only_watertight=False)),
-        volume_ml=float(abs(mesh.volume)) / 1000.0 if watertight else None,
-        centroid_mm=[float(v) for v in mesh.centroid],
-        bounds_mm=[[float(v) for v in row] for row in mesh.bounds],
+        components=components,
+        volume_ml=volume_ml,
+        centroid_mm=centroid,
+        bounds_mm=bounds,
         notes=notes,
+        display_watertight=bool(mesh.is_watertight),
     )
 
 
@@ -188,22 +203,51 @@ def _label_path(subject_dir: Path, label: str) -> Path:
     return subject_dir / "segmentations" / f"{label}.nii.gz"
 
 
+#: Pairs whose names mean "left heart" and "right heart": the circulations, not positions in
+#: the body. The heart is rotated -- the right ventricle is anterior and reaches left of the
+#: midline, the left atrium is posterior and near it -- so each chamber is judged against its
+#: partner, never against the heart's centre or the midline.
+SIDE_PAIRS = (
+    ("heart.left_ventricle", "heart.right_ventricle"),
+    ("heart.left_atrium", "heart.right_atrium"),
+)
+_MIDLINE_SIDED_ROLES = frozenset({"lung", "lung_lobe"})
+
+
 def side_report(
     centroids: Mapping[str, Sequence[float]], ontology: AnatomyOntology
 ) -> dict[str, bool]:
-    """Whether each sided entity lies on its own side of the heart, in the viewer frame.
+    """Whether sided structures are on their sides, in the viewer frame (+X subject's left).
 
-    The viewer frame puts the subject's left at +X, so a left structure's centroid must have
-    a larger X than the heart shell's, and a right one a smaller X.
+    * Lungs and lobes are judged against the body midline: the trachea's x if present, else
+      the midpoint of the two lungs.
+    * Paired heart chambers are judged against each other: the left one must lie further left.
+    * Other sided entities (the IVC, for instance) carry laterality that is not a reliable
+      position test and are not judged.
     """
-    heart_x = float(centroids["heart"][0])
     report: dict[str, bool] = {}
-    for entity_id, centroid in centroids.items():
-        side = str(ontology.get(entity_id).laterality)
-        if side == "left":
-            report[entity_id] = float(centroid[0]) > heart_x
-        elif side == "right":
-            report[entity_id] = float(centroid[0]) < heart_x
+    if "respiratory.trachea" in centroids:
+        midline: float | None = float(centroids["respiratory.trachea"][0])
+    elif "respiratory.left_lung" in centroids and "respiratory.right_lung" in centroids:
+        midline = (float(centroids["respiratory.left_lung"][0])
+                   + float(centroids["respiratory.right_lung"][0])) / 2.0
+    else:
+        midline = None
+    if midline is not None:
+        for entity_id, centroid in centroids.items():
+            entity = ontology.get(entity_id)
+            if entity.semantic_role not in _MIDLINE_SIDED_ROLES:
+                continue
+            side = str(entity.laterality)
+            if side == "left":
+                report[entity_id] = float(centroid[0]) > midline
+            elif side == "right":
+                report[entity_id] = float(centroid[0]) < midline
+    for left, right in SIDE_PAIRS:
+        if left in centroids and right in centroids:
+            ok = float(centroids[left][0]) > float(centroids[right][0])
+            report[left] = ok
+            report[right] = ok
     return report
 
 
