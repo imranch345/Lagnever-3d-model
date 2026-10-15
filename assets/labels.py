@@ -21,6 +21,7 @@ from awr.ontology import AnatomyOntology
 
 __all__ = [
     "DEFAULT_LABEL_MAP",
+    "CropSpec",
     "EntityLabels",
     "LabelMap",
     "LabelSource",
@@ -44,6 +45,14 @@ class LabelSource:
 
 
 @dataclass(frozen=True, slots=True)
+class CropSpec:
+    """Keep only the slices within the superior-inferior extent of ``reference_labels``."""
+
+    description: str
+    reference_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class EntityLabels:
     """The labels whose union becomes one entity's mesh."""
 
@@ -63,7 +72,7 @@ class LabelMap:
     ontology_id: str
     ontology_version: str
     classes: Mapping[str, int]
-    crops: Mapping[str, str]
+    crops: Mapping[str, CropSpec]
     entities: tuple[EntityLabels, ...]
 
     def for_entity(self, entity_id: str) -> EntityLabels:
@@ -78,8 +87,10 @@ class LabelMap:
         return tuple(entry.entity_id for entry in self.entities)
 
     def labels_needed(self) -> tuple[str, ...]:
-        """Every dataset label any entity uses, sorted -- what has to be fetched."""
-        return tuple(sorted({label for entry in self.entities for label in entry.labels}))
+        """Every label any entity or crop uses, sorted -- what has to be fetched."""
+        used = {label for entry in self.entities for label in entry.labels}
+        used |= {label for crop in self.crops.values() for label in crop.reference_labels}
+        return tuple(sorted(used))
 
 
 def _require(raw: Mapping[str, Any], key: str, where: str) -> Any:
@@ -100,7 +111,13 @@ def load_label_map(path: str | Path = DEFAULT_LABEL_MAP) -> LabelMap:
     source = _require(raw, "source", "")
     target = _require(raw, "target_ontology", "")
     classes = {str(k): int(v) for k, v in _require(raw, "classes", "").items()}
-    crops = {str(k): str(v) for k, v in raw.get("crops", {}).items()}
+    crops: dict[str, CropSpec] = {}
+    for name, spec in raw.get("crops", {}).items():
+        references = tuple(str(label) for label in _require(spec, "reference_labels", name))
+        missing = [label for label in references if label not in classes]
+        if not references or missing:
+            raise OntologyError(f"Label map crop {name!r} has bad reference labels {missing}.")
+        crops[str(name)] = CropSpec(str(spec.get("description", "")), references)
 
     ids = list(classes.values())
     if len(set(ids)) != len(ids):

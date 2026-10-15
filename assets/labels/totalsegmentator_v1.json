@@ -27,7 +27,10 @@
     "pulmonary_artery": 49
   },
   "crops": {
-    "thorax": "Keep only slices within the superior-inferior extent of the union of the five lung lobes."
+    "thorax": {
+      "description": "Keep only slices within the superior-inferior extent of the union of the five lung lobes.",
+      "reference_labels": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"]
+    }
   },
   "entities": [
     {

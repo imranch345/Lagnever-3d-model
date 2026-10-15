@@ -65,7 +65,12 @@ packages = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-filterwarnings = ["error"]
+filterwarnings = [
+  "error",
+  # scikit-image's marching-cubes tables set .shape on an array, deprecated in NumPy 2.5.
+  # Third-party and harmless here; scoped to that message from skimage only.
+  "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:skimage.*",
+]
 markers = [
   "slow: end-to-end runs that train a model; deselect with -m 'not slow'",
 ]
