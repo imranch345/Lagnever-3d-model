@@ -1,4 +1,4 @@
-"""Level 1: the mesh pipeline, on synthetic label volumes with known shapes and positions.
+"""Level 1: the mesh pipeline, on the synthetic phantom (assets.phantom) with known shapes.
 
 Real data waits for permission to download, and would not have known answers anyway. Here
 every label is a sphere, ellipsoid or cylinder placed at a chosen RAS+ position, so volumes,
@@ -30,84 +30,29 @@ from assets.meshes import (  # noqa: E402
     build_subject,
     mask_to_mesh,
 )
-
-SPACING = 2.0
-EXTENT = {"x": (-90.0, 90.0), "y": (-60.0, 60.0), "z": (-80.0, 80.0)}
-
-
-def _sphere(c: tuple[float, float, float], r: float):
-    return lambda x, y, z: (x - c[0]) ** 2 + (y - c[1]) ** 2 + (z - c[2]) ** 2 <= r**2
-
-
-def _ellipsoid(c: tuple[float, float, float], r: tuple[float, float, float]):
-    return lambda x, y, z: (
-        ((x - c[0]) / r[0]) ** 2 + ((y - c[1]) / r[1]) ** 2 + ((z - c[2]) / r[2]) ** 2 <= 1.0
-    )
+from assets.phantom import (  # noqa: E402
+    SPACING,
+    phantom_affine,
+    phantom_grid,
+    sphere,
+    write_phantom,
+)
 
 
-def _cylinder(x0: float, y0: float, r: float, z0: float, z1: float):
-    return lambda x, y, z: ((x - x0) ** 2 + (y - y0) ** 2 <= r**2) & (z >= z0) & (z <= z1)
-
-
-#: RAS+ millimetres. Lungs span z from -55 to 70; the aorta and IVC run below them so the
-#: thorax crop has something to remove.
-LAYOUT = {
-    "heart_ventricle_left": _sphere((-15, 0, -10), 12),
-    "heart_ventricle_right": _sphere((10, 10, -10), 12),
-    "heart_atrium_left": _sphere((-12, -15, 10), 10),
-    "heart_atrium_right": _sphere((15, -5, 10), 10),
-    "heart_myocardium": lambda x, y, z: _sphere((-15, 0, -10), 16)(x, y, z)
-    & ~_sphere((-15, 0, -10), 12)(x, y, z),
-    "pulmonary_artery": _sphere((0, 15, 22), 8),
-    "aorta": _cylinder(-10, -22, 8, -75, 60),
-    "inferior_vena_cava": _cylinder(20, -15, 7, -78, -5),
-    "lung_upper_lobe_left": _ellipsoid((-60, 0, 30), (25, 35, 30)),
-    "lung_lower_lobe_left": _ellipsoid((-60, 0, -25), (25, 35, 25)),
-    "lung_upper_lobe_right": _ellipsoid((60, 0, 45), (25, 35, 22)),
-    "lung_middle_lobe_right": _ellipsoid((60, 20, 8), (20, 15, 12)),
-    "lung_lower_lobe_right": _ellipsoid((60, -5, -30), (25, 30, 22)),
-    "trachea": _cylinder(0, -10, 8, 50, 75),
-}
-
-
-def _grid(affine) -> tuple[Any, Any, Any, tuple[int, int, int]]:
-    """World coordinates of every voxel of a grid covering EXTENT under ``affine``."""
-    shape = tuple(
-        int((hi - lo) / SPACING) for lo, hi in (EXTENT["x"], EXTENT["y"], EXTENT["z"])
-    )
-    ijk = np.stack(np.meshgrid(*(np.arange(n) for n in shape), indexing="ij"), axis=-1)
-    world = nib.affines.apply_affine(affine, ijk.reshape(-1, 3)).reshape(*shape, 3)
-    return world[..., 0], world[..., 1], world[..., 2], shape
+def _grid(affine):
+    return phantom_grid(affine)
 
 
 def _affine(orientation: str):
-    """A RAS+ voxel grid, or an LPS one -- the common DICOM-derived orientation."""
-    lo = {k: v[0] for k, v in EXTENT.items()}
-    hi = {k: v[1] for k, v in EXTENT.items()}
-    if orientation == "RAS":
-        return np.array(
-            [[SPACING, 0, 0, lo["x"]], [0, SPACING, 0, lo["y"]], [0, 0, SPACING, lo["z"]],
-             [0, 0, 0, 1]], dtype=float,
-        )
-    return np.array(
-        [[-SPACING, 0, 0, hi["x"]], [0, -SPACING, 0, hi["y"]], [0, 0, SPACING, lo["z"]],
-         [0, 0, 0, 1]], dtype=float,
-    )
+    return phantom_affine(orientation)
 
 
-def _write_subject(root: Path, orientation: str = "RAS", *, empty: tuple[str, ...] = (),
-                   layout: dict[str, Any] | None = None) -> Path:
-    subject = root / f"s_{orientation}"
-    (subject / "segmentations").mkdir(parents=True)
-    affine = _affine(orientation)
-    x, y, z, _shape = _grid(affine)
-    for label, shape_fn in (layout or LAYOUT).items():
-        mask = np.zeros(x.shape, dtype=bool) if label in empty else shape_fn(x, y, z)
-        nib.save(
-            nib.Nifti1Image(mask.astype(np.uint8), affine),
-            str(subject / "segmentations" / f"{label}.nii.gz"),
-        )
-    return subject
+def _sphere(c, r):
+    return sphere(c, r)
+
+
+def _write_subject(root: Path, orientation: str = "RAS", *, empty: tuple[str, ...] = ()) -> Path:
+    return write_phantom(root, orientation, empty=empty)
 
 
 @pytest.fixture(scope="module")
