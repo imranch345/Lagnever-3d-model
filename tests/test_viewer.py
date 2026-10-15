@@ -178,3 +178,34 @@ class TestTheServer:
         for path in ("/../pyproject.toml", "/static/app.js", "/viewer/server.py"):
             status, _ = _get(server + path)
             assert status == 404, path
+
+
+class TestAnimationSchedule:
+    """The page plays the engine's semantic clip; the schedule comes with state."""
+
+    def test_nothing_plays_until_asked(self, engine) -> None:
+        """No clip in state before 'animate blood flow'."""
+        assert scene_state(engine, MANIFEST)["animation"] is None
+
+    def test_the_schedule_covers_the_cycle_with_roles(self, engine) -> None:
+        """Phases tile [0, 1] in order, and the ventricles have a role in every phase."""
+        engine.execute("animate blood flow")
+        clip = scene_state(engine, MANIFEST)["animation"]
+        phases = clip["phases"]
+        assert phases[0]["start"] == 0.0 and phases[-1]["end"] == pytest.approx(1.0)
+        for before, after in zip(phases, phases[1:], strict=False):
+            assert before["end"] == pytest.approx(after["start"])
+        assert all("heart.left_ventricle" in p["roles"] for p in phases)
+        assert clip["semantic_only"] is True
+
+    def test_the_lungs_carry_flow_in_the_thorax(self, engine) -> None:
+        """Pulmonary circulation puts the lungs in the clip."""
+        engine.execute("animate blood flow")
+        carrying = set(scene_state(engine, MANIFEST)["animation"]["carrying_flow"])
+        assert {"respiratory.left_lung", "respiratory.right_lung"} <= carrying
+
+    def test_stopping_clears_the_schedule(self, engine) -> None:
+        """After 'stop the animation' the page stops playing."""
+        engine.execute("animate blood flow")
+        engine.execute("stop the animation")
+        assert scene_state(engine, MANIFEST)["animation"] is None

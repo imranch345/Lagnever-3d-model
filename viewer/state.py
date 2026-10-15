@@ -10,9 +10,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from animation import CardiacFlowModel
 from reasoning.command_engine import CommandEngine
 
-__all__ = ["DEFAULT_COLOURS", "colour_for", "scene_state"]
+__all__ = ["DEFAULT_COLOURS", "animation_schedule", "colour_for", "scene_state"]
 
 #: Presentation only. Left-heart and systemic-arterial structures red (oxygenated),
 #: right-heart and venous structures blue, lungs pink, airway pale.
@@ -44,6 +45,37 @@ def colour_for(entity_id: str, base_color: Any = None) -> str:
         r, g, b = (max(0, min(255, round(float(c) * 255))) for c in base_color)
         return f"#{r:02x}{g:02x}{b:02x}"
     return DEFAULT_COLOURS.get(entity_id, _FALLBACK)
+
+
+def animation_schedule(engine: CommandEngine) -> dict[str, Any] | None:
+    """The playing clip's phases and per-phase roles, or ``None`` when nothing is animated.
+
+    The engine stores on each entity only the role it plays at its own phase; playback needs
+    every phase's roles, so the clip is rebuilt from the same scene and cycle configuration the
+    engine bound it from. Rebuilding is deterministic: the clip is a function of the graph.
+    """
+    scene = engine.scene
+    if scene is None:
+        return None
+    clips = {
+        scene.get(i).state.animation.clip_id
+        for i in scene.ids()
+        if scene.get(i).state.animation.playing
+    }
+    if not clips:
+        return None
+    clip = CardiacFlowModel(scene, engine.config.cardiac_cycle).build_clip()
+    phased = {entity for phase in clip.phases for entity in phase.roles}
+    on_paths = {entity for path in clip.paths for entity in path.entity_ids}
+    return {
+        "clip_id": clip.clip_id,
+        "duration_seconds": clip.duration_seconds,
+        "phases": [phase.to_dict() for phase in clip.phases],
+        # On a flow path but given no phase role (the lungs, the coronary vessels): they carry
+        # flow throughout the cycle, which is how the engine binds them too.
+        "carrying_flow": sorted(on_paths - phased),
+        "semantic_only": True,
+    }
 
 
 def scene_state(engine: CommandEngine, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -92,4 +124,5 @@ def scene_state(engine: CommandEngine, manifest: Mapping[str, Any]) -> dict[str,
         "medical_status": manifest.get(
             "medical_status", "research data, not validated; not for clinical use"
         ),
+        "animation": animation_schedule(engine),
     }

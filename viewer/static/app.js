@@ -30,6 +30,19 @@ scene.add(rim);
 // matched to its mesh through the same rule rather than through the raw name.
 const sanitise = (name) => name.replace(/\s/g, '_').replace(/[[\].:/]/g, '');
 const meshes = new Map();       // entity id -> THREE.Mesh
+const centres = new Map();      // entity id -> mesh centre, the pivot for animated scaling
+const motion = new Map();       // entity id -> { scale, glow }, eased towards each phase's target
+// The engine's clip is semantic: phases and roles, no motion. This turns roles into a gentle,
+// readable cue -- contracting and ejecting shrink and brighten, filling swells, flow glows --
+// and plays the cycle slower than life so the phases can be followed.
+const SLOWER = 3;
+const ROLE_LOOK = {
+  contracting: { scale: 0.95, glow: 0.18 },
+  ejecting: { scale: 0.93, glow: 0.28 },
+  filling: { scale: 1.04, glow: 0.0 },
+  relaxing: { scale: 1.0, glow: 0.0 },
+  carrying_flow: { scale: 1.0, glow: 0.22, pulse: true },
+};
 let state = null;
 let hovered = null;
 
@@ -163,6 +176,7 @@ $('form').addEventListener('submit', (ev) => {
 const examples = [
   'Show only the lungs', 'Show everything', 'Make the left ventricle transparent',
   'Show more detail', 'Show less detail', 'Hide the trachea', 'Explain the right atrium',
+  'Animate blood flow', 'Stop the animation',
 ];
 for (const ex of examples) {
   const b = document.createElement('button');
@@ -197,9 +211,7 @@ function pick(ev) {
 canvas.addEventListener('pointermove', (ev) => {
   const id = pick(ev);
   if (id === hovered) return;
-  if (hovered && meshes.get(hovered)) meshes.get(hovered).material.emissive.setHex(0x000000);
   hovered = id;
-  if (hovered) meshes.get(hovered).material.emissive.setHex(0x333333);
   const e = hovered && state ? byId().get(hovered) : null;
   $('hud').textContent = e ? e.name : '';
 });
@@ -238,6 +250,9 @@ async function start() {
     if (!id) return;
     if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
     o.material = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.05 });
+    o.geometry.computeBoundingBox();
+    centres.set(id, o.geometry.boundingBox.getCenter(new THREE.Vector3()));
+    motion.set(id, { scale: 1, glow: 0 });
     meshes.set(id, o);
     idOf.set(o.uuid, id);
   });
@@ -246,13 +261,65 @@ async function start() {
   if (missing.length) log(`Meshes not found in scene.glb: ${missing.join(', ')}`, 'bad');
   frameScene();
   applyState();
-  $('status').textContent = `${meshes.size} meshes`;
   log('Ready. Type a command, or click a structure.', 'ok');
 }
 
-function loop() {
+// Roles bound to an entity that is not drawn (a lung shell above LOD 0) apply to its drawn
+// descendants instead, so the lungs still take part in the cycle when their lobes are shown.
+function roleTargets(roles) {
+  const out = new Map();
+  if (!state) return out;
+  const ents = byId();
+  const kids = new Map();
+  state.entities.forEach((e) => {
+    if (!kids.has(e.parent)) kids.set(e.parent, []);
+    kids.get(e.parent).push(e.id);
+  });
+  const drawn = (id) => meshes.has(id) && ents.get(id)?.visible;
+  const spread = (id, role) => {
+    if (drawn(id)) { if (!out.has(id)) out.set(id, role); return; }
+    (kids.get(id) || []).forEach((c) => spread(c, role));
+  };
+  Object.entries(roles).forEach(([id, role]) => spread(id, role));
+  return out;
+}
+
+function animate(nowSeconds) {
+  const clip = state?.animation;
+  let targets = new Map();
+  let phaseName = null;
+  if (clip && clip.phases.length) {
+    const period = clip.duration_seconds * SLOWER;
+    const t = (nowSeconds % period) / period;
+    const phase = clip.phases.find((p) => t >= p.start && t < p.end) || clip.phases.at(-1);
+    phaseName = phase.name.replaceAll('_', ' ');
+    const roles = Object.fromEntries((clip.carrying_flow || []).map((id) => [id, 'carrying_flow']));
+    Object.assign(roles, phase.roles);
+    targets = roleTargets(roles);
+  }
+  const pulse = 0.5 + 0.5 * Math.sin(nowSeconds * 6);
+  meshes.forEach((mesh, id) => {
+    const look = ROLE_LOOK[targets.get(id)] || { scale: 1, glow: 0 };
+    const m = motion.get(id);
+    m.scale += (look.scale - m.scale) * 0.12;
+    const glow = look.pulse ? look.glow * pulse : look.glow;
+    m.glow += (glow - m.glow) * 0.2;
+    const c = centres.get(id);
+    mesh.scale.setScalar(m.scale);
+    mesh.position.set(c.x * (1 - m.scale), c.y * (1 - m.scale), c.z * (1 - m.scale));
+    const hover = id === hovered ? 0.22 : 0;
+    mesh.material.emissive.copy(mesh.material.color).multiplyScalar(Math.max(m.glow, hover));
+  });
+  const base = `${meshes.size} meshes`;
+  $('status').textContent = phaseName
+    ? `Cardiac cycle, ${SLOWER}× slower (semantic): ${phaseName}`
+    : base;
+}
+
+function loop(nowMs) {
   requestAnimationFrame(loop);
   controls.update();
+  if (meshes.size) animate((nowMs || 0) / 1000);
   renderer.render(scene, camera);
 }
 start().catch((err) => { $('status').textContent = 'Failed to load'; log(String(err), 'bad'); });
