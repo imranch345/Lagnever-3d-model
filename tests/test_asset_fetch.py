@@ -188,3 +188,44 @@ class TestFetchSubset:
         # small archive the last subject's labels share cached blocks with the index.)
         assert third.members == 0
         assert third.subjects == second.subjects
+
+
+class TestTransientFailures:
+    """A server error partway through must not end the fetch."""
+
+    def test_a_5xx_is_retried_and_the_read_succeeds(self, archive: bytes) -> None:
+        """The second range request fails once with 500; the read still returns the bytes."""
+        calls = {"n": 0}
+
+        class Flaky(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A002, D102
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802, D102
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    self.send_response(500)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                match = re.match(r"bytes=(\d+)-(\d+)", self.headers.get("Range", ""))
+                start, end = int(match[1]), min(int(match[2]), len(archive) - 1)
+                body = archive[start : end + 1]
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(archive)}")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Flaky)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}/x.zip"
+            f = HttpRangeFile(url, budget_bytes=len(archive), block_size=4096,
+                              backoff_seconds=0.01)
+            f.seek(100)
+            assert f.read(50) == archive[100:150]
+            assert f.retries == 1
+        finally:
+            server.shutdown()
+            server.server_close()
