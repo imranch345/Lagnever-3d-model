@@ -147,3 +147,34 @@ Lungs lie on the correct side. The checks are automated and reported, not eyebal
 A learned model that generates new, plausible hearts and lungs. Per-entity implicit fields
 (ADR 0003) are trained on hundreds of these subjects and conditioned on the AWR. It needs a GPU,
 which means a cost decision, and it starts only after Level 1 works end to end.
+
+---
+
+## Status, 2026-10-15
+
+*Appended; the plan above is unchanged.*
+
+| milestone | state |
+| --- | --- |
+| Plan, ADRs, thorax domain, label map | done |
+| Mesh pipeline, on a synthetic phantom | done |
+| Byte-range fetcher and quality report | done; fetch tested only against a local server |
+| Fetch 20 subjects (~100–150 MB), build them, choose one | **waiting for permission to download** |
+| Viewer and local server | done; checked in the browser on the phantom |
+| Language layer | **waiting for an API cost decision** |
+| Polish | partly done: pulmonary circulation, cardiac-cycle playback |
+
+### What changed from the plan, and why
+
+* **Engine fixes moved earlier.** The browser check showed "show only the lungs" drawing the
+  LOD-0 lung shells and the lobes on top of each other. So `CommandEngine._drawable_targets`
+  now resolves shell against parts by active LOD. "Hide the heart" now hides its parts, and
+  "generate the heart and lungs" builds the thorax.
+* **Connectedness is counted in voxels, not surfaces.** A hollow myocardium has two surfaces
+  and is still one structure. The quality report's hard check uses mask pieces.
+* **The field-of-view check exempts the trachea** and the cropped vessels, which leave the
+  thorax by nature.
+* **Pulmonary circulation was added** once the flow model had tests (ADR-L1-001, decision 4).
+  The viewer then gained cardiac-cycle playback, which plays the engine's semantic clip slower
+  than life.
+* **`AnatomyType` stays frozen.** The research feature extractor sizes an input from it.
