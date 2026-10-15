@@ -10,7 +10,9 @@ Guards, because a mistake here could pull tens of gigabytes:
 * a hard byte budget -- exceeding it raises before the request is made;
 * a server that ignores ``Range`` (answers 200 instead of 206) is refused, never read;
 * the index is read once; members are taken only from subjects that ``meta.csv`` describes as
-  covering the thorax, until enough subjects whose heart and lung labels are non-empty.
+  covering the thorax, until enough subjects whose heart and lung labels are non-empty;
+* subjects already on disk at the archive's file sizes are reused, not fetched again, so a
+  larger fetch extends a smaller one.
 
 Standard library only. Data lands under ``datasets/raw/`` (git-ignored) with a report that
 records what was fetched, from where, under which license (ADR-L1-004).
@@ -189,6 +191,7 @@ class FetchReport:
     license: str
     attribution: str
     subjects: list[str] = field(default_factory=list)
+    reused: list[str] = field(default_factory=list)
     rejected: dict[str, str] = field(default_factory=dict)
     members: int = 0
     bytes_downloaded: int = 0
@@ -261,12 +264,21 @@ def fetch_subset(
             if set(members) != needed:
                 report.rejected[subject] = f"missing {sorted(needed - set(members))}"
                 continue
+            folder = out_dir / subject / "segmentations"
+            if all(
+                (folder / f"{label}.nii.gz").is_file()
+                and (folder / f"{label}.nii.gz").stat().st_size == members[label].file_size
+                for label in needed
+            ):
+                # Already on disk at the archive's sizes, from an earlier fetch: not re-read.
+                report.subjects.append(subject)
+                report.reused.append(subject)
+                continue
             payload = {label: archive.read(members[label]) for label in sorted(needed)}
             empty = [label for label in REQUIRED_NON_EMPTY if not _non_empty(payload[label])]
             if empty:
                 report.rejected[subject] = f"empty {empty}"
                 continue
-            folder = out_dir / subject / "segmentations"
             folder.mkdir(parents=True, exist_ok=True)
             for label, raw in payload.items():
                 (folder / f"{label}.nii.gz").write_bytes(raw)

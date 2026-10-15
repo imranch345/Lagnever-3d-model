@@ -173,3 +173,18 @@ class TestFetchSubset:
         fetch_subset(tmp_path, url=url, subjects=1, budget_bytes=20 * 1024 * 1024)
         text = (tmp_path / "fetch_report.json").read_text(encoding="utf-8")
         assert "CC BY 4.0" in text and url in text
+
+
+    def test_a_second_fetch_reuses_what_is_on_disk(self, remote, tmp_path: Path) -> None:
+        """Extending a fetch re-reads only the index, not the labels already there."""
+        url, _ = remote
+        fetch_subset(tmp_path, url=url, subjects=1, budget_bytes=20 * 1024 * 1024)
+        second = fetch_subset(tmp_path, url=url, subjects=2, budget_bytes=20 * 1024 * 1024)
+        assert second.reused == ["s0001"]
+        assert second.subjects == ["s0001", "s0004"]
+        third = fetch_subset(tmp_path, url=url, subjects=2, budget_bytes=20 * 1024 * 1024)
+        assert third.reused == ["s0001", "s0004"]
+        # Nothing new is read or written for reused subjects. (Bytes are not compared: in this
+        # small archive the last subject's labels share cached blocks with the index.)
+        assert third.members == 0
+        assert third.subjects == second.subjects
