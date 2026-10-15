@@ -32,6 +32,7 @@ from typing import Any
 
 import numpy as np
 
+from shapes.joint import fit_joint
 from shapes.register import fit_error, load_scene, make_template, register, rigid_to
 from shapes.ssm import ShapeModel, fit
 
@@ -178,6 +179,37 @@ def build_models(
             model.save(out_dir / "models" / f"{entity}.npz")
             entry.update(evaluate(model, held, train, seed))
         report["entities"][entity] = entry
+
+    # One model over every entity, so samples stay consistent (shapes.joint). Only subjects
+    # with every entity registered within the threshold contribute or are evaluated.
+    complete_train = [s for s in train_ids if all(s in shapes[e] for e in entities)]
+    complete_held = [s for s in held_ids if all(s in shapes[e] for e in entities)]
+    if len(complete_train) >= 2:
+        joint = fit_joint(
+            shapes, {e: templates[e].faces for e in entities}, complete_train, variance=variance
+        )
+        joint.save(out_dir / "models" / "joint.npz")
+        stacked = {
+            s: np.concatenate([shapes[e][s] for e in entities])
+            for s in complete_train + complete_held
+        }
+        joint_eval = evaluate(
+            joint.model,
+            {s: stacked[s] for s in complete_held},
+            {s: stacked[s] for s in complete_train},
+            seed,
+        )
+        report["joint"] = {
+            "train": len(complete_train),
+            "held_out": len(complete_held),
+            **joint_eval,
+        }
+    reference_manifest = json.loads(
+        (scenes_root / reference_id / "manifest.json").read_text(encoding="utf-8")
+    )
+    (out_dir / "provenance.json").write_text(
+        json.dumps(reference_manifest.get("source", {}), indent=2), encoding="utf-8"
+    )
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
@@ -191,6 +223,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-fit-mm", type=float, default=2.0)
     args = parser.parse_args(argv)
     report = build_models(args.scenes, args.out, entities=args.entities, max_fit_mm=args.max_fit_mm)
+    joint = report.get("joint")
+    if joint:
+        print(
+            f"joint: {joint['train']} train, {joint['modes']} modes "
+            f"({joint['explained_total']}), generality {joint['generality_mm']} mm "
+            f"vs mean {joint['mean_baseline_mm']} mm, specificity {joint['specificity_mm']} mm"
+        )
     for entity, entry in report["entities"].items():
         print(
             f"{entity}: {entry.get('train')} train, {len(entry['excluded'])} excluded, "

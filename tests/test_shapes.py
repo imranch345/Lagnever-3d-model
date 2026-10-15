@@ -161,3 +161,103 @@ def test_the_build_finds_the_population_variation(tmp_path: Path) -> None:
         max_fit_mm=2.0,
     )
     assert again["entities"] == built["entities"], "cached registrations must give the same models"
+
+
+def _sphere_population(n: int = 8) -> tuple[dict, dict, list[str]]:
+    """Four entities as icospheres at anatomical sides (viewer frame: +X is the left)."""
+    rng = np.random.default_rng(1)
+    centres = {
+        "heart.left_ventricle": (15.0, -5.0, 0.0),
+        "heart.right_ventricle": (-10.0, -5.0, 10.0),
+        "respiratory.left_lung": (60.0, 10.0, 0.0),
+        "respiratory.right_lung": (-60.0, 10.0, 0.0),
+    }
+    radii = {
+        "heart.left_ventricle": 12.0,
+        "heart.right_ventricle": 12.0,
+        "respiratory.left_lung": 35.0,
+        "respiratory.right_lung": 38.0,
+    }
+    base = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+    subjects = [f"s{i}" for i in range(n)]
+    shapes: dict[str, dict[str, np.ndarray]] = {e: {} for e in centres}
+    for s in subjects:
+        size = 1.0 + 0.1 * rng.standard_normal()
+        for e, c in centres.items():
+            shapes[e][s] = base.vertices * radii[e] * size + np.array(c)
+    faces = {e: base.faces for e in centres}
+    return shapes, faces, subjects
+
+
+class TestJointModelAndSamples:
+    """One model over several entities, and generated scenes from it."""
+
+    def test_the_joint_model_keeps_entities_apart(self, tmp_path: Path) -> None:
+        """Segments split back exactly; incomplete subjects are left out; save/load works."""
+        from shapes.joint import JointModel, fit_joint
+
+        shapes, faces, subjects = _sphere_population()
+        del shapes["heart.right_ventricle"]["s7"]
+        joint = fit_joint(shapes, faces, subjects)
+        assert "s7" not in joint.model.subjects and len(joint.model.subjects) == 7
+        mean = joint.sample_entities([])
+        assert set(mean) == set(shapes)
+        assert all(len(v) == len(faces[e]) * 0 + len(shapes[e]["s0"]) for e, v in mean.items())
+        joint.save(tmp_path / "joint.npz")
+        again = JointModel.load(tmp_path / "joint.npz")
+        assert again.segments == joint.segments
+        assert np.array_equal(again.faces["heart.left_ventricle"], faces["heart.left_ventricle"])
+
+    def test_a_sample_scene_is_honest_and_checked(self, tmp_path: Path) -> None:
+        """Same seed, same sample; the manifest says it is generated and passes the checks."""
+        from shapes.generate import write_sample_scene
+        from shapes.joint import fit_joint
+
+        shapes, faces, subjects = _sphere_population()
+        joint = fit_joint(shapes, faces, subjects)
+        first = write_sample_scene(
+            joint, tmp_path / "a", seed=3, provenance={"license": "CC BY 4.0"}
+        )
+        second = write_sample_scene(joint, tmp_path / "b", seed=3)
+        assert first["generated"]["coefficients"] == second["generated"]["coefficients"]
+        assert first["generated"]["seed"] == 3 and "not a measurement" in first["medical_status"]
+        assert first["source"]["license"] == "CC BY 4.0"
+        assert first["checks"]["usable"], first["checks"]["hard"]
+        assert all(first["sides_correct"].values())
+        loaded = trimesh.load(tmp_path / "a" / "scene.glb", force="scene")
+        assert set(loaded.graph.nodes_geometry) == set(shapes)
+
+    def test_the_viewer_swaps_geometry_and_keeps_scene_state(self, tmp_path: Path) -> None:
+        """A sample changes the meshes served, not what the engine says is hidden."""
+        from shapes.generate import write_sample_scene
+        from shapes.joint import fit_joint
+        from viewer.server import ViewerApp
+
+        shapes, faces, subjects = _sphere_population()
+        joint = fit_joint(shapes, faces, subjects)
+        real = tmp_path / "real"
+        write_sample_scene(joint, real, seed=0)
+        app = ViewerApp(
+            real,
+            sampler=lambda seed, out: write_sample_scene(joint, out, seed=seed),
+            samples_dir=tmp_path / "samples",
+        )
+        app.command("hide the trachea")
+        reply = app.sample(5)
+        assert reply["ok"] and app.scene_dir == tmp_path / "samples" / "seed-5"
+        assert reply["state"]["generated"]["seed"] == 5
+        trachea = next(e for e in reply["state"]["entities"] if e["id"] == "respiratory.trachea")
+        assert trachea["visible"] is False
+        assert app.original()["ok"] and app.scene_dir == real
+
+    def test_without_a_model_sampling_says_how_to_enable_it(self, tmp_path: Path) -> None:
+        """No sampler: a clear answer, nothing changes."""
+        from shapes.generate import write_sample_scene
+        from shapes.joint import fit_joint
+        from viewer.server import ViewerApp
+
+        shapes, faces, subjects = _sphere_population()
+        write_sample_scene(fit_joint(shapes, faces, subjects), tmp_path / "real", seed=0)
+        app = ViewerApp(tmp_path / "real")
+        reply = app.sample()
+        assert not reply["ok"] and "--model" in reply["message"]
