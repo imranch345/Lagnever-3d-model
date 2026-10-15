@@ -131,16 +131,6 @@ class TestTheThoraxOntology:
         roles = {thorax.get(e).semantic_role for e in RESPIRATORY if not thorax.get(e).is_group}
         assert roles == {"lung", "lung_lobe", "airway"}
 
-    def test_there_is_no_heart_lung_functional_edge_yet(self, thorax: AnatomyOntology) -> None:
-        """Pulmonary circulation is deferred until the flow animation is tested against it."""
-        functional = [
-            e for e in thorax.relationships.all_edges()
-            if str(thorax.registry.get(e.relation).graph) == "functional"
-            and (e.subject.startswith("respiratory.") or e.object.startswith("respiratory."))
-        ]
-        assert functional == []
-
-
 def _write(directory: Path, ontology_id: str, *, includes: list[Any] | None = None,
            entities: list[str], root: str, version: str = "0.1.0") -> None:
     directory.mkdir(parents=True, exist_ok=True)
@@ -365,3 +355,58 @@ class TestGeneratingTheThorax:
         assert not response.ok
         assert "no lungs" in response.message
         assert engine.execute("generate a human heart").ok
+
+
+class TestPulmonaryCirculation:
+    """The lungs join the heart's two circuits into one, in the thorax only."""
+
+    @pytest.fixture()
+    def model(self):
+        """The flow model over a thorax scene."""
+        from animation import CardiacFlowModel
+
+        config = load_domain_config(domain="thorax")
+        engine = CommandEngine(config=config)
+        engine.execute("generate the heart and lungs")
+        return CardiacFlowModel(engine.scene, config.cardiac_cycle)
+
+    @pytest.mark.parametrize("granularity", ["summary", "detailed"])
+    def test_blood_from_the_body_crosses_a_lung_between_the_two_sides(
+        self, model, granularity: str
+    ) -> None:
+        """Every path from a vena cava: right ventricle, then a lung, then left ventricle."""
+        from awr.relationships import Granularity
+
+        paths = model.flow_paths(granularity=Granularity(granularity))
+        caval = [p for p in paths if p.segments[0].source.endswith("vena_cava")]
+        assert caval
+        lungs_seen = set()
+        for path in caval:
+            chain = [path.segments[0].source, *(s.target for s in path.segments)]
+            lung = next(e for e in chain if e.startswith("respiratory."))
+            lungs_seen.add(lung)
+            assert chain.index("heart.right_ventricle") < chain.index(lung)
+            assert chain.index(lung) < chain.index("heart.left_ventricle")
+        assert lungs_seen == {"respiratory.left_lung", "respiratory.right_lung"}
+
+    def test_the_pulmonary_veins_are_no_longer_a_source(self, model) -> None:
+        """In the thorax they are fed by the lungs; only systemic returns start a path."""
+        sources = {p.segments[0].source for p in model.flow_paths()}
+        assert "heart.pulmonary_veins" not in sources
+        assert sources <= {"heart.superior_vena_cava", "heart.inferior_vena_cava",
+                           "heart.coronary_sinus"}
+
+    def test_the_heart_alone_keeps_its_reported_boundary(self) -> None:
+        """Loaded alone, the heart's flow still ends at the pulmonary arteries."""
+        from animation import CardiacFlowModel
+
+        engine = CommandEngine(config=load_domain_config(domain="heart"))
+        engine.execute("generate a human heart")
+        terminals = {p.segments[-1].target for p in CardiacFlowModel(engine.scene).flow_paths()}
+        assert "heart.pulmonary_arteries" in terminals
+
+    @pytest.mark.parametrize("lod", [1, 2])
+    def test_the_cycle_clip_builds(self, model, lod: int) -> None:
+        """The semantic clip still derives at both granularities."""
+        clip = model.build_clip(lod=lod)
+        assert clip.entity_ids

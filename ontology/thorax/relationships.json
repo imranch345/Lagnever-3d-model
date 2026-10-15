@@ -6,7 +6,7 @@
   "status": "DRAFT_UNVALIDATED",
   "description": "Edges added by the thorax domain. The included heart edges come from ontology/heart/relationships.json unchanged. Conventions are the heart ontology's: inverses and symmetric relations are declared once, and left_of / right_of use the subject's own left and right.",
   "conventions": {
-    "functional": "No functional edges between the heart and the lungs in v0.1. Pulmonary circulation is a later addition, made together with tests on the flow animation, which derives its paths from the functional graph."
+    "functional": "Pulmonary circulation joins the heart's two circuits: the pulmonary arteries exit into each lung and each lung exits into the pulmonary veins. Granularity 'any', so the flow model uses these at every LOD. The heart ontology's boundary at the pulmonary arteries still applies when the heart is loaded alone."
   },
   "edges": [
     { "subject": "respiratory.left_lung", "relation": "left_of", "object": "heart" },
@@ -22,6 +22,10 @@
     { "subject": "respiratory.lung_middle_lobe_right", "relation": "anterior_to", "object": "respiratory.lung_lower_lobe_right", "note": "Across the oblique fissure." },
     { "subject": "respiratory.lung_upper_lobe_right", "relation": "adjacent_to", "object": "respiratory.lung_middle_lobe_right" },
     { "subject": "respiratory.lung_middle_lobe_right", "relation": "adjacent_to", "object": "respiratory.lung_lower_lobe_right" },
-    { "subject": "respiratory.lung_upper_lobe_right", "relation": "adjacent_to", "object": "respiratory.lung_lower_lobe_right", "note": "Posteriorly, across the oblique fissure." }
+    { "subject": "respiratory.lung_upper_lobe_right", "relation": "adjacent_to", "object": "respiratory.lung_lower_lobe_right", "note": "Posteriorly, across the oblique fissure." },
+    { "subject": "heart.pulmonary_arteries", "relation": "exits_into", "object": "respiratory.left_lung", "granularity": "any", "note": "Deoxygenated blood to the left lung's capillary bed." },
+    { "subject": "heart.pulmonary_arteries", "relation": "exits_into", "object": "respiratory.right_lung", "granularity": "any", "note": "Deoxygenated blood to the right lung's capillary bed." },
+    { "subject": "respiratory.left_lung", "relation": "exits_into", "object": "heart.pulmonary_veins", "granularity": "any", "note": "Oxygenated blood returns through the pulmonary veins." },
+    { "subject": "respiratory.right_lung", "relation": "exits_into", "object": "heart.pulmonary_veins", "granularity": "any", "note": "Oxygenated blood returns through the pulmonary veins." }
   ]
 }

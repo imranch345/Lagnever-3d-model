@@ -26,9 +26,12 @@ to either would alter the research models and break bit-exact reproduction of fr
 3. **`AnatomyType` is frozen while research steps run.** Lungs, lobes and the trachea use
    `organ`. `semantic_role` carries `lung`, `lung_lobe` or `airway`. A test pins the enum at
    14 members.
-4. **No heart–lung functional edges in v0.1.** The flow animation derives its paths from the
-   functional graph. Pulmonary circulation is added later, together with tests on that
-   animation.
+4. **Pulmonary circulation, tested on the flow model.** The flow animation derives its paths
+   from the functional graph. The thorax adds four `exits_into` edges: the pulmonary arteries
+   into each lung, and each lung into the pulmonary veins. Blood from a vena cava then passes
+   the right ventricle, a lung and the left ventricle in that order. The heart loaded alone
+   keeps its reported boundary at the pulmonary arteries. These edges were held back from the
+   first commit and added once the flow tests existed.
 
 ## Alternatives considered
 
