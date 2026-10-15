@@ -34,7 +34,10 @@ CT_BYTES = 3 * 1024 * 1024
 
 @pytest.fixture(scope="module")
 def archive(tmp_path_factory) -> bytes:
-    """Four subjects: two thorax scans, one with an empty heart, one abdomen-only scan."""
+    """Four subjects: two thorax scans, one with an empty heart, one abdomen-only scan.
+
+    meta.csv starts with a byte-order mark, as the real one does.
+    """
     root = tmp_path_factory.mktemp("dataset")
     write_phantom(root, name="s0001")
     write_phantom(root, name="s0002", empty=("heart_ventricle_left",))
@@ -44,7 +47,7 @@ def archive(tmp_path_factory) -> bytes:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.writestr(
             "Totalsegmentator_dataset/meta.csv",
-            "image_id;age;gender;institute;study_type;split\n"
+            "\ufeffimage_id;age;gender;institute;study_type;split\n"
             "s0001;60;m;A;ct thorax;train\n"
             "s0002;55;f;A;ct thorax-abdomen;train\n"
             "s0003;70;m;B;ct abdomen;train\n"

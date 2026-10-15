@@ -202,11 +202,14 @@ def _thorax_subjects(archive: zipfile.ZipFile) -> list[str] | None:
     names = [n for n in archive.namelist() if n.endswith("meta.csv")]
     if not names:
         return None
+    # utf-8-sig: the real meta.csv starts with a byte-order mark, which would otherwise
+    # become part of the first column's name and hide every image_id.
     with archive.open(names[0]) as handle:
-        rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8"), delimiter=";"))
+        text = io.TextIOWrapper(handle, encoding="utf-8-sig")
+        rows = list(csv.DictReader(text, delimiter=";"))
     if rows and len(rows[0]) == 1:  # comma-separated after all
         with archive.open(names[0]) as handle:
-            rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8")))
+            rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8-sig")))
     out = []
     for row in rows:
         study = " ".join(str(v) for k, v in row.items() if k and "study" in k.lower()).lower()
