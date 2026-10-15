@@ -178,12 +178,12 @@ class TemplateSceneExplainer(SceneExplainer):
         if entity.definition.notes:
             points.append(f"Note: {entity.definition.notes}")
 
-        article = "The" if not entity.is_group else "The"
+        kind = str(entity.anatomy_type).replace("_", " ")
+        indefinite = "an" if kind[:1] in "aeiou" else "a"
         return Explanation(
             text=(
-                f"{article} {entity.display_name.lower()} ({entity.entity_id}) is a "
-                f"{str(entity.anatomy_type).replace('_', ' ')} with the role "
-                f"{entity.semantic_role.replace('_', ' ')}."
+                f"The {entity.display_name.lower()} ({entity.entity_id}) is {indefinite} "
+                f"{kind} with the role {entity.semantic_role.replace('_', ' ')}."
             ),
             points=tuple(points),
             entity_ids=(entity_id,),
