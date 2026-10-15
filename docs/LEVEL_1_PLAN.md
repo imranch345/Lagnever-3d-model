@@ -161,7 +161,7 @@ which means a cost decision, and it starts only after Level 1 works end to end.
 | Byte-range fetcher and quality report | done; fetch tested only against a local server |
 | Fetch 20 subjects, build them, choose one | done: 32.6 MB fetched; 15 of 20 usable; s0029 chosen (see below) |
 | Viewer and local server | done; checked in the browser on the phantom |
-| Language layer | decided: the Claude API, when it is needed; not built yet |
+| Language layer | built, off by default (`LAGNAV_LANGUAGE=claude` turns it on); ADR-L1-005 |
 | Polish | partly done: pulmonary circulation, cardiac-cycle playback |
 
 ### What changed from the plan, and why

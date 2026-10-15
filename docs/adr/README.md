@@ -57,10 +57,12 @@ an intuition two experiments had been built on.
 
 
 The `ADR-L1-*` series belongs to Level 1, the product track (`docs/LEVEL_1_PLAN.md`). It
-records four decisions:
+records five decisions:
 
 * the thorax domain includes Heart Ontology v0.1 unchanged, and `AnatomyType` stays frozen
   while research steps run (ADR-L1-001);
 * Level 1 geometry is reference geometry from real CT, not generated geometry (ADR-L1-002);
 * asset tooling is a third dependency tier (ADR-L1-003);
 * attribution and license travel with every asset (ADR-L1-004).
+* free text reaches Claude only as a request for a closed AWR program, off by default and
+  after the rule parser (ADR-L1-005).

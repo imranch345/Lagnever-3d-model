@@ -209,3 +209,31 @@ class TestAnimationSchedule:
         engine.execute("animate blood flow")
         engine.execute("stop the animation")
         assert scene_state(engine, MANIFEST)["animation"] is None
+
+
+class TestTheLanguageLayerInTheServer:
+    """Commands route through the language layer; replies say which path ran."""
+
+    def test_rules_by_default(self, tmp_path) -> None:
+        """No translator: rules only, and the state says so."""
+        (tmp_path / "manifest.json").write_text(json.dumps(MANIFEST), encoding="utf-8")
+        app = ViewerApp(tmp_path, translator=None)
+        app.translator = None
+        reply = app.command("hide the trachea")
+        assert reply["ok"] and reply["source"] == "rules" and reply["program"] is None
+        assert reply["state"]["language"] == "rules"
+
+    def test_free_text_shows_the_program(self, tmp_path) -> None:
+        """With a translator, the reply carries the program and the commands it ran."""
+        from language.program import Program, Step
+
+        class Scripted:
+            def translate(self, text: str) -> Program:
+                return Program(steps=(Step("hide", ("respiratory.lungs",)),))
+
+        (tmp_path / "manifest.json").write_text(json.dumps(MANIFEST), encoding="utf-8")
+        app = ViewerApp(tmp_path, translator=Scripted())
+        reply = app.command("get the lungs out of my way")
+        assert reply["ok"] and reply["source"] == "claude"
+        assert reply["commands"] == ["hide respiratory.lungs"]
+        assert reply["state"]["language"] == "claude"

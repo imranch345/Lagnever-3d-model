@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from awr.config import load_domain_config
+from language.layer import LanguageLayer, Translator, translator_from_environment
 from reasoning.command_engine import CommandEngine
 from viewer.state import scene_state
 
@@ -35,7 +36,13 @@ MAX_COMMAND_BYTES = 4096
 class ViewerApp:
     """One engine, one built scene, and a lock so commands apply one at a time."""
 
-    def __init__(self, scene_dir: Path, *, domain: str = "thorax") -> None:
+    def __init__(
+        self,
+        scene_dir: Path,
+        *,
+        domain: str = "thorax",
+        translator: Translator | None = None,
+    ) -> None:
         self.scene_dir = scene_dir
         self.domain = domain
         self.manifest: dict[str, Any] = json.loads(
@@ -43,34 +50,63 @@ class ViewerApp:
         )
         self.lock = threading.Lock()
         self.engine = self._fresh_engine()
+        # Off unless enabled (LAGNAV_LANGUAGE=claude): the rule parser handles everything it
+        # understands for free, and only free-form text the parser cannot read reaches Claude.
+        self.translator = (
+            translator
+            if translator is not None
+            else translator_from_environment(self.engine.ontology)
+        )
 
     def _fresh_engine(self) -> CommandEngine:
         engine = CommandEngine(config=load_domain_config(domain=self.domain))
         engine.execute("generate the heart and lungs")
         return engine
 
+    def _state(self) -> dict[str, Any]:
+        state = scene_state(self.engine, self.manifest)
+        state["language"] = "claude" if self.translator is not None else "rules"
+        return state
+
     def state(self) -> dict[str, Any]:
         """The current state, for the page."""
         with self.lock:
-            return scene_state(self.engine, self.manifest)
+            return self._state()
 
     def command(self, text: str) -> dict[str, Any]:
-        """Run one command through the engine; never raises for a bad command."""
+        """Run one request through the language layer and the engine; never raises.
+
+        The reply says which path ran ("rules" or "claude") and, for the language model, the
+        program it produced and the commands applied, so every change is visible.
+        """
         with self.lock:
+            program: dict[str, Any] | None = None
+            commands: list[str] = []
+            source = "rules"
             try:
-                result = self.engine.execute(text)
-                ok, message = bool(result.ok), str(result.message)
+                result = LanguageLayer(self.engine, self.translator).execute(text)
+                ok, message, source = result.ok, result.message, result.source
+                program, commands = result.program, result.commands
             except Exception as exc:  # noqa: BLE001 - reported to the page, not swallowed
                 ok, message = False, f"{type(exc).__name__}: {exc}"
-            return {"ok": ok, "message": message, "state": scene_state(self.engine, self.manifest)}
+            return {
+                "ok": ok,
+                "message": message,
+                "source": source,
+                "program": program,
+                "commands": commands,
+                "state": self._state(),
+            }
+
+    def language_enabled(self) -> bool:
+        """Whether free-form text can reach the language model."""
+        return self.translator is not None
 
     def reset(self) -> dict[str, Any]:
         """Start the scene again."""
         with self.lock:
             self.engine = self._fresh_engine()
-            return {"ok": True, "message": "Scene reset.", "state": scene_state(
-                self.engine, self.manifest
-            )}
+            return {"ok": True, "message": "Scene reset.", "state": self._state()}
 
 
 def _handler(app: ViewerApp) -> type[BaseHTTPRequestHandler]:

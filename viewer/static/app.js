@@ -171,6 +171,11 @@ async function run(text) {
   });
   const body = await res.json();
   if (!res.ok) { log(body.error || 'Request failed', 'bad'); return; }
+  if (body.source === 'claude' && body.program) {
+    const steps = body.program.steps.map((s) =>
+      [s.op, s.targets.join(', '), s.value].filter(Boolean).join(' '));
+    log(steps.length ? `Claude program: ${steps.join('; ')}` : 'Claude program: (none)', 'cmd');
+  }
   log(body.message, body.ok ? 'ok' : 'bad');
   state = body.state;
   applyState();
@@ -238,6 +243,9 @@ async function start() {
     fetch('/state').then((r) => r.json()),
   ]);
   state = first;
+  $('text').placeholder = state.language === 'claude'
+    ? 'Ask in your own words, e.g. "let me see inside the heart"'
+    : 'e.g. make the left ventricle transparent';
   $('banner').textContent =
     `${state.medical_status[0].toUpperCase()}${state.medical_status.slice(1)}.`;
   const c = state.credits;
