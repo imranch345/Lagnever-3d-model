@@ -46,7 +46,7 @@ class ViewerApp:
 
     def _fresh_engine(self) -> CommandEngine:
         engine = CommandEngine(config=load_domain_config(domain=self.domain))
-        engine.execute("generate a human heart")
+        engine.execute("generate the heart and lungs")
         return engine
 
     def state(self) -> dict[str, Any]:

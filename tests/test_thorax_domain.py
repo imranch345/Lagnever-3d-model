@@ -270,3 +270,98 @@ class TestTheEngineDrivesTheLungs:
     def test_respiratory_commands_resolve(self, engine: CommandEngine, command: str) -> None:
         """Names, synonyms and groups resolve through the composite ontology."""
         assert engine.execute(command).ok
+
+
+def _visible(engine: CommandEngine) -> set[str]:
+    return {i for i in engine.scene.ids() if engine.scene.get(i).state.visibility}
+
+
+class TestShellOrPartsNeverBoth:
+    """With real geometry a shell and its parts overlap, so one stands for the organ at a time."""
+
+    @pytest.fixture()
+    def engine(self) -> CommandEngine:
+        """A thorax scene at LOD 1."""
+        engine = CommandEngine(config=load_domain_config(domain="thorax"))
+        engine.execute("Generate a human heart")
+        return engine
+
+    SHELLS = {
+        "heart": "heart.left_ventricle",
+        "respiratory.left_lung": "respiratory.lung_upper_lobe_left",
+        "respiratory.right_lung": "respiratory.lung_middle_lobe_right",
+    }
+
+    def _assert_never_both(self, engine: CommandEngine) -> None:
+        visible = _visible(engine)
+        for shell, part in self.SHELLS.items():
+            assert not (shell in visible and part in visible), (shell, part)
+
+    @pytest.mark.parametrize(
+        "commands",
+        [
+            ["show the lungs"],
+            ["show the heart"],
+            ["isolate the lungs"],
+            ["show everything"],
+            ["show less detail", "show the lungs"],
+            ["show less detail", "show everything"],
+            ["hide the heart", "show the heart"],
+        ],
+    )
+    def test_no_command_shows_a_shell_with_its_parts(
+        self, engine: CommandEngine, commands: list[str]
+    ) -> None:
+        """At any LOD, after any of these, a shell and its parts are never both visible."""
+        for command in commands:
+            assert engine.execute(command).ok, command
+        self._assert_never_both(engine)
+
+    def test_naming_an_organ_above_its_shell_level_means_its_parts(
+        self, engine: CommandEngine
+    ) -> None:
+        """At LOD 1, 'hide the heart' hides the chambers and vessels."""
+        engine.execute("hide the heart")
+        visible = _visible(engine)
+        assert not any(i.startswith("heart") for i in visible)
+        assert "respiratory.lung_upper_lobe_left" in visible
+
+    def test_at_the_shell_level_the_organ_is_its_shell(self, engine: CommandEngine) -> None:
+        """At LOD 0, the lungs are two shells, not five lobes."""
+        engine.execute("show less detail")
+        engine.execute("isolate the lungs")
+        assert _visible(engine) == {"respiratory.left_lung", "respiratory.right_lung"}
+
+    def test_explicit_requests_outside_the_lod_still_win(self, engine: CommandEngine) -> None:
+        """Unchanged behaviour: 'show the valves' at LOD 1 shows the valves."""
+        engine.execute("show the valves")
+        assert "heart.mitral_valve" in _visible(engine)
+
+    def test_explain_still_targets_the_organ_itself(self, engine: CommandEngine) -> None:
+        """Only drawing operations resolve shells to parts; explanation does not."""
+        response = engine.execute("explain the heart")
+        assert response.ok and "heart" in response.message.lower()
+
+
+class TestGeneratingTheThorax:
+    """'Generate the heart and lungs' is understood, and refused where there are no lungs."""
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Generate the heart and lungs", "build the thorax", "create the chest",
+         "generate the lungs and heart"],
+    )
+    def test_the_thorax_domain_builds_on_request(self, text: str) -> None:
+        """All 53 entities, as with the heart phrase."""
+        engine = CommandEngine(config=load_domain_config(domain="thorax"))
+        response = engine.execute(text)
+        assert response.ok, response.message
+        assert len(engine.scene.ids()) == 53
+
+    def test_the_heart_domain_says_it_has_no_lungs(self) -> None:
+        """Rather than silently building a heart and calling it the lungs."""
+        engine = CommandEngine(config=load_domain_config(domain="heart"))
+        response = engine.execute("generate the heart and lungs")
+        assert not response.ok
+        assert "no lungs" in response.message
+        assert engine.execute("generate a human heart").ok

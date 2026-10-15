@@ -46,10 +46,11 @@ resolves names against one ontology.
 
 * The existing `CommandEngine` drives the lungs with no code change: show, hide, isolate,
   opacity, LOD and explain all resolve through the composite.
-* Three engine behaviours written for a single organ need revisiting in Level 1's engine
-  milestone:
-  - "hide the heart" hides only its LOD 0 shell;
-  - "show the lungs" also shows the shells;
-  - the parser has no "heart and lungs" generate phrase.
+* Three engine behaviours written for a single organ were fixed in Level 1's engine work
+  (`CommandEngine._drawable_targets` and the generate vocabulary):
+  - an organ with an LOD-0 shell is drawn as its shell or as its parts, never both;
+  - "hide the heart" above LOD 0 hides its parts;
+  - "generate the heart and lungs" (or "the thorax", "the chest") builds the thorax scene, and
+    is refused with a reason in a domain that has no lungs.
 * Extending `AnatomyType` waits until the research track closes, or until the feature
   extractor stops depending on the enum's size.

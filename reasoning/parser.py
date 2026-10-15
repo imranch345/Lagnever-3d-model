@@ -133,7 +133,10 @@ class CommandParser(ABC):
 # Ordered, fully anchored patterns. Order matters: more specific patterns come
 # first so that "hide everything except the chambers" is not read as "hide X".
 
-_ORGAN = r"(?:human\s+)?(?P<organ>heart|human heart)"
+_ORGAN = (
+    r"(?:human\s+)?(?P<organ>heart\s+and\s+(?:the\s+)?lungs|lungs\s+and\s+(?:the\s+)?heart"
+    r"|heart|human heart|thorax|chest|lungs)"
+)
 _LEVELS = r"(?P<level>primary|school|high[\s-]?school|university|medical)"
 _FLOW = (
     r"(?:blood\s*flow|blood\s*circulation|circulation|flow|cardiac\s*cycle"

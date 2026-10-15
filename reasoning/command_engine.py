@@ -203,6 +203,52 @@ class CommandEngine:
         except (UnknownEntityReferenceError, AmbiguousEntityReferenceError):
             raise  # already carries suggestions or candidates
 
+    def _drawable_targets(self, command: ParsedCommand) -> tuple[str, ...]:
+        """Targets for an operation that changes what is drawn, read against the active LOD.
+
+        An organ with an LOD-0 shell -- the heart, each lung -- is drawn either as its shell
+        or as its parts, never both, because with real geometry the two overlap. So:
+
+        * at or below the shell's ``max_lod`` the shell stands for the organ, and parts that
+          only exist above it are dropped from a group expansion ("show the lungs" at LOD 0
+          shows two lungs, not two lungs and five lobes);
+        * above it the parts stand for the organ: the shell is dropped, and an organ named on
+          its own is replaced by its parts at this LOD ("hide the heart" at LOD 1 hides the
+          chambers and vessels, not an already-hidden shell). Hiding keeps the shell too, so
+          a later LOD change cannot reveal it.
+
+        Explicit requests for structures outside the LOD still win ("show the valves" at
+        LOD 1), as before; only the shell/parts alternation is resolved here.
+        """
+        scene = self.require_scene()
+        targets = list(self._targets(command))
+        level = scene.active_lod
+        chosen = set(targets)
+        added: list[str] = []
+        for shell_id in targets:
+            shell = scene.get(shell_id)
+            ceiling = shell.definition.lod_policy.max_lod
+            if shell.is_group or ceiling is None:
+                continue
+            parts = [p for p in scene.descendants(shell_id) if scene.get(p).renderable]
+            if not parts:
+                continue
+            if level <= ceiling:
+                chosen -= {
+                    p for p in parts if scene.get(p).definition.lod_policy.min_lod > ceiling
+                }
+                continue
+            named_alone = not chosen.intersection(parts)
+            if command.intent is not Intent.HIDE:
+                chosen.discard(shell_id)
+            if named_alone:
+                for part in parts:
+                    policy = scene.get(part).definition.lod_policy
+                    if policy.includes(level) and part not in chosen:
+                        chosen.add(part)
+                        added.append(part)
+        return tuple(t for t in (*targets, *added) if t in chosen)
+
     def _respond(
         self,
         command: ParsedCommand,
@@ -226,6 +272,13 @@ class CommandEngine:
 
     # --- handlers ------------------------------------------------------
     def _handle_generate(self, command: ParsedCommand) -> CommandResponse:
+        asked = " ".join(command.selector.phrases).lower()
+        wants_lungs = any(word in asked for word in ("lung", "thorax", "chest"))
+        if wants_lungs and "respiratory.lungs" not in self.ontology:
+            raise CommandError(
+                f"This scene's anatomy ({self.ontology.title}) has no lungs. "
+                "Use the thorax domain for the heart and lungs."
+            )
         result = self.generator.generate(GenerationRequest(text=command.raw_text))
         self.attach_scene(result.scene)
         scene = result.scene
@@ -247,25 +300,25 @@ class CommandEngine:
 
     def _handle_show(self, command: ParsedCommand) -> CommandResponse:
         editor = self._require_editor()
-        targets = self._targets(command)
+        targets = self._drawable_targets(command)
         applied = editor.apply(ShowEntities(targets), command_text=command.raw_text)
         return self._respond(command, applied)
 
     def _handle_hide(self, command: ParsedCommand) -> CommandResponse:
         editor = self._require_editor()
-        targets = self._targets(command)
+        targets = self._drawable_targets(command)
         applied = editor.apply(HideEntities(targets), command_text=command.raw_text)
         return self._respond(command, applied)
 
     def _handle_isolate(self, command: ParsedCommand) -> CommandResponse:
         editor = self._require_editor()
-        targets = self._targets(command)
+        targets = self._drawable_targets(command)
         applied = editor.apply(IsolateEntities(targets), command_text=command.raw_text)
         return self._respond(command, applied)
 
     def _handle_set_opacity(self, command: ParsedCommand) -> CommandResponse:
         editor = self._require_editor()
-        targets = self._targets(command)
+        targets = self._drawable_targets(command)
         opacity, preset = self._opacity_value(command)
         applied = editor.apply(
             SetOpacity(tuple(targets), opacity, preset_name=preset),
