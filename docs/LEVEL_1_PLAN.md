@@ -159,9 +159,9 @@ which means a cost decision, and it starts only after Level 1 works end to end.
 | Plan, ADRs, thorax domain, label map | done |
 | Mesh pipeline, on a synthetic phantom | done |
 | Byte-range fetcher and quality report | done; fetch tested only against a local server |
-| Fetch 20 subjects (~100–150 MB), build them, choose one | **waiting for permission to download** |
+| Fetch 20 subjects, build them, choose one | done: 32.6 MB fetched; 15 of 20 usable; s0029 chosen (see below) |
 | Viewer and local server | done; checked in the browser on the phantom |
-| Language layer | **waiting for an API cost decision** |
+| Language layer | built, off by default (`LAGNAV_LANGUAGE=claude` turns it on); ADR-L1-005 |
 | Polish | partly done: pulmonary circulation, cardiac-cycle playback |
 
 ### What changed from the plan, and why
@@ -178,3 +178,37 @@ which means a cost decision, and it starts only after Level 1 works end to end.
   The viewer then gained cardiac-cycle playback, which plays the engine's semantic clip slower
   than life.
 * **`AnatomyType` stays frozen.** The research feature extractor sizes an input from it.
+
+### What the first real subjects taught the checks
+
+The first build of 20 real subjects (TotalSegmentator v1, 32.6 MB fetched) passed none of the
+quality checks. Reading the reasons showed two errors in the checks, not in the data:
+
+* **Chamber sides were judged against the heart's centre.** "Left" and "right" in chamber names
+  mean the two circulations. The heart is rotated: the right ventricle is anterior and reaches
+  left of the midline, and the left atrium is posterior and close to it. Every subject
+  "failed" for the left atrium. Chambers are now judged against their partner (left
+  ventricle left of right ventricle, left atrium left of right atrium), and lungs and lobes
+  against the body midline at the trachea. The phantom had hidden this because its chambers
+  were placed with the same naive idea.
+* **Watertightness was measured after decimation.** Full-resolution lung surfaces are closed;
+  decimating to 20,000 faces opened small holes. Quality is now measured before decimation,
+  and the display mesh's own closure is recorded as information only.
+
+Several subjects still fail for genuine reasons: scans cut above the heart, and structures
+missing from the field of view.
+
+### The first real scene
+
+After those fixes, 15 of the 20 subjects pass every hard check. The five that fail do so for
+genuine reasons:
+
+* scans cut above the heart, with the trachea or pulmonary trunk missing (s0038, s0058,
+  s0089);
+* an aorta split by the field of view (s0057);
+* a heart and left lung cut at the left and inferior faces (s0067).
+
+The chosen subject is **s0029**. It is the first usable subject with no dropped specks:
+17 closed surfaces, and all 11 side checks pass. In the browser, an anterior view shows the
+right lung's three lobes on screen left, the trachea above, and with the lungs hidden the
+aortic arch, pulmonary trunk and chambers in their expected places.

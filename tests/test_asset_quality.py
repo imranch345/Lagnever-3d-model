@@ -87,3 +87,16 @@ def test_choose_picks_the_clean_subject(built) -> None:
 def test_choose_returns_none_when_nothing_is_usable(built) -> None:
     """Better no subject than a broken one."""
     assert choose([assess(built["truncated"]), assess(built["swapped"])]) is None
+
+
+def test_build_all_records_a_broken_subject_and_builds_the_rest(tmp_path) -> None:
+    """One unreadable scan must not stop the batch; it is reported with its error."""
+    from assets.quality import build_all
+
+    raw = tmp_path / "raw"
+    write_phantom(raw, name="s0001")
+    broken = write_phantom(raw, name="s0002")
+    (broken / "segmentations" / "trachea.nii.gz").write_bytes(b"not a nifti")
+    failures = build_all(raw, tmp_path / "scenes")
+    assert list(failures) == ["s0002"]
+    assert (tmp_path / "scenes" / "s0001" / "manifest.json").is_file()

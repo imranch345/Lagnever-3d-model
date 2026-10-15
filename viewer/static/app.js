@@ -46,13 +46,22 @@ const ROLE_LOOK = {
 let state = null;
 let hovered = null;
 
+// Until the person moves the camera, keep the whole scene framed: the pane can change size
+// after the first frame (a preview opening, a panel resizing), and a fit made at the old
+// size leaves the scene tiny or cropped.
+let userMoved = false;
+controls.addEventListener('start', () => { userMoved = true; });
+
 function resize() {
   const { clientWidth: w, clientHeight: h } = canvas.parentElement;
+  if (!w || !h) return;
   renderer.setSize(w, h, false);
-  camera.aspect = w / Math.max(h, 1);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (!userMoved && meshes.size) frameScene();
 }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(canvas.parentElement);
 
 function frameScene() {
   const box = new THREE.Box3();
@@ -162,6 +171,11 @@ async function run(text) {
   });
   const body = await res.json();
   if (!res.ok) { log(body.error || 'Request failed', 'bad'); return; }
+  if (body.source === 'claude' && body.program) {
+    const steps = body.program.steps.map((s) =>
+      [s.op, s.targets.join(', '), s.value].filter(Boolean).join(' '));
+    log(steps.length ? `Claude program: ${steps.join('; ')}` : 'Claude program: (none)', 'cmd');
+  }
   log(body.message, body.ok ? 'ok' : 'bad');
   state = body.state;
   applyState();
@@ -221,29 +235,38 @@ canvas.addEventListener('click', (ev) => {
   if (e) run(`explain the ${e.name.toLowerCase()}`);
 });
 
-async function start() {
-  resize();
-  $('status').textContent = 'Loading scene…';
-  const [manifest, first] = await Promise.all([
-    fetch('/manifest.json').then((r) => r.json()),
-    fetch('/state').then((r) => r.json()),
-  ]);
-  state = first;
-  $('banner').textContent =
-    `${state.medical_status[0].toUpperCase()}${state.medical_status.slice(1)}.`;
+function showHeader() {
+  $('text').placeholder = state.language === 'claude'
+    ? 'Ask in your own words, e.g. "let me see inside the heart"'
+    : 'e.g. make the left ventricle transparent';
+  const status = `${state.medical_status[0].toUpperCase()}${state.medical_status.slice(1)}.`;
+  const g = state.generated;
+  $('banner').textContent = g
+    ? `Generated thorax (seed ${g.seed}, ${g.modes} modes, ${g.training_subjects} training subjects). ${status}`
+    : status;
   const c = state.credits;
   $('credits').innerHTML = '';
   $('credits').append(
-    `Shapes derived from ${c.dataset} v${c.version} (subject ${c.subject}), ${c.license}. `,
+    g ? `Sampled from a shape model trained on ${c.dataset} v${c.version}, ${c.license}. `
+      : `Shapes derived from ${c.dataset} v${c.version} (subject ${c.subject}), ${c.license}. `,
     Object.assign(document.createElement('a'), { href: c.url, textContent: 'Source', target: '_blank', rel: 'noopener' }),
     ` · ${c.attribution}`,
   );
+  $('sampling').hidden = !state.sampling;
+}
 
+// Load (or reload) the current scene's meshes. The AWR state is untouched: a new geometry is
+// a new view of the same scene, so visibility and opacity carry over.
+let loaded = null;
+async function loadScene() {
+  const manifest = await fetch('/manifest.json').then((r) => r.json());
+  if (loaded) scene.remove(loaded);
+  meshes.clear(); centres.clear(); motion.clear(); idOf.clear();
   const wanted = new Map(Object.keys(manifest.entities).map((id) => [sanitise(id), id]));
   if (wanted.size !== Object.keys(manifest.entities).length) {
     log('Two entity ids collide after glTF name sanitising; some meshes are ambiguous.', 'bad');
   }
-  const gltf = await new GLTFLoader().loadAsync('/scene.glb');
+  const gltf = await new GLTFLoader().loadAsync(`/scene.glb?v=${Date.now()}`);
   gltf.scene.traverse((o) => {
     if (!o.isMesh) return;
     const id = wanted.get(o.name) ?? wanted.get(o.parent?.name);
@@ -257,10 +280,33 @@ async function start() {
     idOf.set(o.uuid, id);
   });
   scene.add(gltf.scene);
+  loaded = gltf.scene;
   const missing = Object.keys(manifest.entities).filter((id) => !meshes.has(id));
   if (missing.length) log(`Meshes not found in scene.glb: ${missing.join(', ')}`, 'bad');
-  frameScene();
+  if (!userMoved) frameScene();
   applyState();
+}
+
+async function swap(path, body) {
+  const res = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  });
+  const reply = await res.json();
+  log(reply.message || reply.error, reply.ok ? 'ok' : 'bad');
+  if (!reply.ok) return;
+  state = reply.state;
+  showHeader();
+  await loadScene();
+}
+$('sample').addEventListener('click', () => swap('/sample'));
+$('original').addEventListener('click', () => swap('/original'));
+
+async function start() {
+  resize();
+  $('status').textContent = 'Loading scene…';
+  state = await fetch('/state').then((r) => r.json());
+  showHeader();
+  await loadScene();
   log('Ready. Type a command, or click a structure.', 'ok');
 }
 

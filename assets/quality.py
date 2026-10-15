@@ -7,8 +7,10 @@ would be worse than not checking.
 **Hard** -- a subject that fails any of these is not usable:
 
 * every mapped entity has a mesh;
-* every left and right entity lies on its own side of the heart;
-* every mesh is watertight, and its mask is one connected piece once specks below the
+* lungs and lobes lie on their own side of the body midline, and each left heart chamber lies
+  left of its right partner (``assets.meshes.side_report``);
+* every full-resolution surface is watertight (decimation for display may open holes and is
+  not judged), and its mask is one connected piece once specks below the
   pipeline's component fraction are ignored (a hollow myocardium counts as one);
 * no heart or lung structure touches a face of the scanned volume -- touching means the field
   of view cut it off. Cropped vessels and the trachea, which run out of the thorax by nature,
@@ -120,14 +122,39 @@ def choose(qualities: Sequence[SubjectQuality]) -> SubjectQuality | None:
     return min(usable, key=lambda q: (len(q.soft), q.dropped_components, q.subject))
 
 
+def build_all(raw_root: Path, scenes: Path) -> dict[str, str]:
+    """Build every subject under ``raw_root`` into ``scenes``; return build failures by subject.
+
+    A subject that cannot be built is recorded with its error and is simply not usable; one
+    bad scan must not stop the others.
+    """
+    from assets.meshes import build_subject
+
+    failures: dict[str, str] = {}
+    for subject in sorted(p for p in raw_root.iterdir() if (p / "segmentations").is_dir()):
+        try:
+            build_subject(subject, scenes / subject.name)
+        except Exception as exc:  # noqa: BLE001 - recorded per subject, not swallowed
+            failures[subject.name] = f"{type(exc).__name__}: {exc}"
+        print(f"built {subject.name}: {failures.get(subject.name, 'ok')}", flush=True)
+    return failures
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Assess every built subject under a folder and write ``quality_report.json`` there."""
     parser = argparse.ArgumentParser(description="Rank built Level 1 subjects.")
     parser.add_argument("--scenes", type=Path, required=True)
+    parser.add_argument("--build-from", type=Path, default=None,
+                        help="raw subjects to build into --scenes first")
     args = parser.parse_args(argv)
+    failures = build_all(args.build_from, args.scenes) if args.build_from else {}
     qualities = [
         assess(json.loads(path.read_text(encoding="utf-8")))
         for path in sorted(args.scenes.glob("*/manifest.json"))
+    ]
+    qualities += [
+        SubjectQuality(subject=name, usable=False, hard=[f"build failed: {error}"])
+        for name, error in failures.items()
     ]
     chosen = choose(qualities)
     report = {

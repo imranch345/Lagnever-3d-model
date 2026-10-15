@@ -34,7 +34,10 @@ CT_BYTES = 3 * 1024 * 1024
 
 @pytest.fixture(scope="module")
 def archive(tmp_path_factory) -> bytes:
-    """Four subjects: two thorax scans, one with an empty heart, one abdomen-only scan."""
+    """Four subjects: two thorax scans, one with an empty heart, one abdomen-only scan.
+
+    meta.csv starts with a byte-order mark, as the real one does.
+    """
     root = tmp_path_factory.mktemp("dataset")
     write_phantom(root, name="s0001")
     write_phantom(root, name="s0002", empty=("heart_ventricle_left",))
@@ -44,7 +47,7 @@ def archive(tmp_path_factory) -> bytes:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.writestr(
             "Totalsegmentator_dataset/meta.csv",
-            "image_id;age;gender;institute;study_type;split\n"
+            "\ufeffimage_id;age;gender;institute;study_type;split\n"
             "s0001;60;m;A;ct thorax;train\n"
             "s0002;55;f;A;ct thorax-abdomen;train\n"
             "s0003;70;m;B;ct abdomen;train\n"
@@ -170,3 +173,59 @@ class TestFetchSubset:
         fetch_subset(tmp_path, url=url, subjects=1, budget_bytes=20 * 1024 * 1024)
         text = (tmp_path / "fetch_report.json").read_text(encoding="utf-8")
         assert "CC BY 4.0" in text and url in text
+
+
+    def test_a_second_fetch_reuses_what_is_on_disk(self, remote, tmp_path: Path) -> None:
+        """Extending a fetch re-reads only the index, not the labels already there."""
+        url, _ = remote
+        fetch_subset(tmp_path, url=url, subjects=1, budget_bytes=20 * 1024 * 1024)
+        second = fetch_subset(tmp_path, url=url, subjects=2, budget_bytes=20 * 1024 * 1024)
+        assert second.reused == ["s0001"]
+        assert second.subjects == ["s0001", "s0004"]
+        third = fetch_subset(tmp_path, url=url, subjects=2, budget_bytes=20 * 1024 * 1024)
+        assert third.reused == ["s0001", "s0004"]
+        # Nothing new is read or written for reused subjects. (Bytes are not compared: in this
+        # small archive the last subject's labels share cached blocks with the index.)
+        assert third.members == 0
+        assert third.subjects == second.subjects
+
+
+class TestTransientFailures:
+    """A server error partway through must not end the fetch."""
+
+    def test_a_5xx_is_retried_and_the_read_succeeds(self, archive: bytes) -> None:
+        """The second range request fails once with 500; the read still returns the bytes."""
+        calls = {"n": 0}
+
+        class Flaky(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A002, D102
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802, D102
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    self.send_response(500)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                match = re.match(r"bytes=(\d+)-(\d+)", self.headers.get("Range", ""))
+                start, end = int(match[1]), min(int(match[2]), len(archive) - 1)
+                body = archive[start : end + 1]
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(archive)}")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Flaky)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}/x.zip"
+            f = HttpRangeFile(url, budget_bytes=len(archive), block_size=4096,
+                              backoff_seconds=0.01)
+            f.seek(100)
+            assert f.read(50) == archive[100:150]
+            assert f.retries == 1
+        finally:
+            server.shutdown()
+            server.server_close()

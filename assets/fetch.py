@@ -9,8 +9,12 @@ Guards, because a mistake here could pull tens of gigabytes:
 
 * a hard byte budget -- exceeding it raises before the request is made;
 * a server that ignores ``Range`` (answers 200 instead of 206) is refused, never read;
+* transient failures -- 5xx, 429, dropped connections -- are retried with backoff (Zenodo
+  answered one 500 partway through a 200-subject fetch); client errors are not;
 * the index is read once; members are taken only from subjects that ``meta.csv`` describes as
-  covering the thorax, until enough subjects whose heart and lung labels are non-empty.
+  covering the thorax, until enough subjects whose heart and lung labels are non-empty;
+* subjects already on disk at the archive's file sizes are reused, not fetched again, so a
+  larger fetch extends a smaller one.
 
 Standard library only. Data lands under ``datasets/raw/`` (git-ignored) with a report that
 records what was fetched, from where, under which license (ADR-L1-004).
@@ -28,6 +32,7 @@ import json
 import re
 import struct
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Callable, Sequence
@@ -83,9 +88,14 @@ class HttpRangeFile(io.RawIOBase):
         block_size: int = 128 * 1024,
         max_cached_blocks: int = 64,
         opener: Callable[..., Any] = urllib.request.urlopen,
+        attempts: int = 5,
+        backoff_seconds: float = 2.0,
     ) -> None:
         super().__init__()
         self.url = url
+        self.attempts = attempts
+        self.backoff_seconds = backoff_seconds
+        self.retries = 0
         self.block_size = block_size
         self.max_cached_blocks = max_cached_blocks
         self.counter = _Counter(budget=budget_bytes)
@@ -103,12 +113,26 @@ class HttpRangeFile(io.RawIOBase):
                 f"({self.counter.used} used)"
             )
         request = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end}"})
-        with self._open(request, timeout=60) as response:
-            if getattr(response, "status", None) != 206:
-                raise RangeNotSupportedError(
-                    f"{self.url} answered {getattr(response, 'status', '?')} to a range request"
-                )
-            data = bytes(response.read(length + 1))
+        for attempt in range(self.attempts):
+            try:
+                with self._open(request, timeout=60) as response:
+                    if getattr(response, "status", None) != 206:
+                        raise RangeNotSupportedError(
+                            f"{self.url} answered {getattr(response, 'status', '?')} "
+                            "to a range request"
+                        )
+                    data = bytes(response.read(length + 1))
+                break
+            except urllib.error.HTTPError as exc:
+                # Server-side and rate-limit errors are transient; client errors are not.
+                if exc.code < 500 and exc.code != 429 or attempt == self.attempts - 1:
+                    raise
+                exc.close()
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                if attempt == self.attempts - 1:
+                    raise
+            self.retries += 1
+            time.sleep(self.backoff_seconds * 2**attempt)
         if len(data) != length:
             raise OSError(f"expected {length} bytes for {start}-{end}, got {len(data)}")
         self.counter.used += length
@@ -189,6 +213,7 @@ class FetchReport:
     license: str
     attribution: str
     subjects: list[str] = field(default_factory=list)
+    reused: list[str] = field(default_factory=list)
     rejected: dict[str, str] = field(default_factory=dict)
     members: int = 0
     bytes_downloaded: int = 0
@@ -202,11 +227,14 @@ def _thorax_subjects(archive: zipfile.ZipFile) -> list[str] | None:
     names = [n for n in archive.namelist() if n.endswith("meta.csv")]
     if not names:
         return None
+    # utf-8-sig: the real meta.csv starts with a byte-order mark, which would otherwise
+    # become part of the first column's name and hide every image_id.
     with archive.open(names[0]) as handle:
-        rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8"), delimiter=";"))
+        text = io.TextIOWrapper(handle, encoding="utf-8-sig")
+        rows = list(csv.DictReader(text, delimiter=";"))
     if rows and len(rows[0]) == 1:  # comma-separated after all
         with archive.open(names[0]) as handle:
-            rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8")))
+            rows = list(csv.DictReader(io.TextIOWrapper(handle, encoding="utf-8-sig")))
     out = []
     for row in rows:
         study = " ".join(str(v) for k, v in row.items() if k and "study" in k.lower()).lower()
@@ -258,12 +286,21 @@ def fetch_subset(
             if set(members) != needed:
                 report.rejected[subject] = f"missing {sorted(needed - set(members))}"
                 continue
+            folder = out_dir / subject / "segmentations"
+            if all(
+                (folder / f"{label}.nii.gz").is_file()
+                and (folder / f"{label}.nii.gz").stat().st_size == members[label].file_size
+                for label in needed
+            ):
+                # Already on disk at the archive's sizes, from an earlier fetch: not re-read.
+                report.subjects.append(subject)
+                report.reused.append(subject)
+                continue
             payload = {label: archive.read(members[label]) for label in sorted(needed)}
             empty = [label for label in REQUIRED_NON_EMPTY if not _non_empty(payload[label])]
             if empty:
                 report.rejected[subject] = f"empty {empty}"
                 continue
-            folder = out_dir / subject / "segmentations"
             folder.mkdir(parents=True, exist_ok=True)
             for label, raw in payload.items():
                 (folder / f"{label}.nii.gz").write_bytes(raw)

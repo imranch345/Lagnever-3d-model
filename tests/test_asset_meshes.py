@@ -205,3 +205,52 @@ class TestTheSubjectBuild:
         )
         with pytest.raises(ValueError, match="different grid"):
             build_subject(subject, tmp_path / "out")
+
+
+class TestRealAnatomyLessons:
+    """Two checks the first real subjects proved wrong, now fixed and pinned."""
+
+    @pytest.fixture()
+    def thorax(self):
+        """The thorax ontology, for laterality and roles."""
+        from awr.ontology import load_ontology
+
+        return load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+
+    def test_chambers_are_judged_against_their_partner_not_the_heart(self, thorax) -> None:
+        """A real left atrium lies right of the heart's centre yet left of the right atrium."""
+        from assets.meshes import side_report
+
+        centroids = {
+            "heart": [0.0, 0.0, 0.0],
+            "heart.left_atrium": [-5.0, 0.0, -30.0],   # right of the heart centre ...
+            "heart.right_atrium": [-35.0, 0.0, 0.0],   # ... but left of its partner
+            "heart.left_ventricle": [30.0, 0.0, 10.0],
+            "heart.right_ventricle": [5.0, 0.0, 30.0],  # anterior and left of the heart centre
+        }
+        report = side_report(centroids, thorax)
+        assert report == {e: True for e in centroids if e != "heart"}
+
+    def test_lungs_are_judged_against_the_midline(self, thorax) -> None:
+        """The trachea marks the midline; a lobe on the wrong side of it is wrong."""
+        from assets.meshes import side_report
+
+        centroids = {
+            "respiratory.trachea": [10.0, 80.0, 0.0],
+            "respiratory.lung_upper_lobe_left": [70.0, 40.0, 0.0],
+            "respiratory.lung_upper_lobe_right": [40.0, 40.0, 0.0],  # left of the midline
+        }
+        report = side_report(centroids, thorax)
+        assert report["respiratory.lung_upper_lobe_left"] is True
+        assert report["respiratory.lung_upper_lobe_right"] is False
+
+    def test_quality_is_measured_before_decimation(self) -> None:
+        """Heavy decimation must not turn a closed segmentation into a 'not watertight' one."""
+        affine = _affine("RAS")
+        x, y, z, _ = _grid(affine)
+        _mesh, quality = mask_to_mesh(
+            _sphere((0, 0, 0), 40)(x, y, z), affine, MeshParameters(max_faces=300)
+        )
+        assert quality.watertight
+        assert quality.volume_ml == pytest.approx(4 / 3 * math.pi * 40**3 / 1000, rel=0.05)
+        assert "decimated for display" in quality.notes
