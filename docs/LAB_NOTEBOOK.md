@@ -187,3 +187,12 @@ of the frozen protocol.
   - Validity: each reference continuation reproduces frozen seed 9 exactly: 400 at 35 of
     35 checkpoints, 600 at 31 of 31.
   - Branch outcomes are not read until Stage 1 completes, per the preregistration.
+- **Shape build hardened before the 200-subject run.** A review found two problems that would
+  have cost hours:
+  - one subject raising during loading, alignment or registration would have ended the whole
+    build;
+  - a failed alignment after a successful load would have let that subject's remaining
+    entities register **unaligned**.
+
+  Such subjects are now excluded with the error, and not cached, so a rebuild retries them.
+  Each registration also records its alignment cost, for later diagnosis. Covered by a new test.

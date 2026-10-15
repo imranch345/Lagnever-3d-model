@@ -114,6 +114,62 @@ class TestRegistration:
         assert error["mean_from_target"] < 1.0 and error["mean_to_target"] < 1.0
 
 
+def test_a_failing_subject_is_excluded_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subject whose alignment or registration raises is recorded, and the build goes on."""
+    import shapes.build as build
+
+    # Sphere scenes. s2's heart (31 mm) makes alignment fail; s3's ventricle (13 mm) makes
+    # registration fail. Both are injected failures around the real functions.
+    scenes = tmp_path / "scenes"
+    for index in range(5):
+        scene = trimesh.Scene()
+        heart = trimesh.creation.icosphere(subdivisions=2, radius=31.0 if index == 2 else 30.0)
+        ventricle = trimesh.creation.icosphere(subdivisions=2, radius=10.0 + index)
+        scene.add_geometry(heart, node_name="heart", geom_name="heart")
+        scene.add_geometry(
+            ventricle, node_name="heart.left_ventricle", geom_name="heart.left_ventricle"
+        )
+        (scenes / f"s{index}").mkdir(parents=True)
+        (scenes / f"s{index}" / "scene.glb").write_bytes(scene.export(file_type="glb"))
+    (scenes / "s0" / "manifest.json").write_text(json.dumps({"source": {"dataset": "spheres"}}))
+    subjects = [{"subject": f"s{i}", "usable": True} for i in range(5)]
+    (scenes / "quality_report.json").write_text(json.dumps({"chosen": "s0", "subjects": subjects}))
+
+    def radius(mesh: trimesh.Trimesh) -> float:
+        return float(np.linalg.norm(mesh.vertices - mesh.vertices.mean(axis=0), axis=1).max())
+
+    real_rigid, real_register = build.rigid_to, build.register
+
+    def rigid(reference: trimesh.Trimesh, moving: trimesh.Trimesh, **kw: int) -> tuple:
+        if abs(radius(moving) - 31.0) < 0.5:
+            raise RuntimeError("alignment diverged")
+        return real_rigid(reference, moving, **kw)
+
+    def register(template: trimesh.Trimesh, target: trimesh.Trimesh) -> np.ndarray:
+        if abs(radius(target) - 13.0) < 0.5:
+            raise ValueError("degenerate target")
+        return real_register(template, target)
+
+    monkeypatch.setattr(build, "rigid_to", rigid)
+    monkeypatch.setattr(build, "register", register)
+    out = tmp_path / "out"
+    built = build.build_models(
+        scenes, out, entities=["heart.left_ventricle"], template_faces=200, holdout_fraction=0.2
+    )
+    entry = built["entities"]["heart.left_ventricle"]
+    assert entry["excluded"] == {
+        "s2": "failed: RuntimeError: alignment diverged",
+        "s3": "failed: ValueError: degenerate target",
+    }
+    assert entry["registered"] == 3
+    cache = out / "registrations"
+    assert sorted(p.name.split("__")[0] for p in cache.iterdir()) == ["s0", "s1", "s4"]
+    stored = np.load(cache / "s1__heart.left_ventricle.npz")
+    assert "rigid_cost" in json.loads(str(stored["error"]))
+
+
 @pytest.mark.slow
 def test_the_build_finds_the_population_variation(tmp_path: Path) -> None:
     """Six phantoms differing only in left ventricle radius: one dominant mode, beats the mean."""
