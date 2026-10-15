@@ -83,6 +83,21 @@ python -m viewer.server --scene datasets/processed/level1/phantom --port 8791
 Then open `http://127.0.0.1:8791/` and type, for example, "show only the lungs" or
 "make the left ventricle transparent".
 
+### Level 2a: generating a thorax
+
+**[docs/LEVEL_2_PLAN.md](docs/LEVEL_2_PLAN.md)**. A statistical shape model, built from many
+real subjects, generates new, plausible hearts and lungs. It comes before any neural model, and
+it runs on a CPU. The code is in `shapes/`:
+
+* subjects are aligned by the heart;
+* one template per entity is fitted to every subject by non-rigid registration;
+* a joint PCA model is fitted over the entities;
+* the model is evaluated on held-out subjects against a mean-shape baseline;
+* sampled scenes are marked as generated.
+
+The viewer can draw from a model with `--model`, and it keeps the scene's state when the
+geometry changes. Generated anatomy is not a measurement of anyone.
+
 ### What Step 7 changed about how to read Step 6
 
 Step 6 reported that the typed graph encoder was not earning its parameters. **That
@@ -468,6 +483,8 @@ datasets/     Dataset schema, licensing policy, synthetic example, synthetic and
 ontology/     Versioned ontology data (Heart Ontology v0.1; Thorax Ontology v0.1 includes it)
 assets/       Level 1: label map, byte-range fetcher, mesh pipeline, quality report, phantom
 viewer/       Level 1: local server around the CommandEngine, and the three.js page
+language/     Level 1: free text to a closed AWR program (rule parser first, Claude if enabled)
+shapes/       Level 2a: alignment, correspondence, shape models, generated scenes
 configs/      Domain configuration, the (empty) model configuration, neural experiment configs
 experiments/  Runnable demonstrations, the pre-registered heart experiment, and the
               runners for Steps 7 to 20
