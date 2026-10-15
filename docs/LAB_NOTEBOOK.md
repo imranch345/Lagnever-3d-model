@@ -168,3 +168,22 @@ of the frozen protocol.
     errors with backoff and reuses subjects already on disk (`02fd2a3`, `15440f7`). It resumed.
 - **Process correction.** PR #6 had been merged on 2026-10-15, and 12 commits pushed to its
   branch afterwards never reached `main`. They were moved to PR #7, and #6 was annotated.
+
+## 2026-10-16 — Level 2a data in hand
+
+- **Fetch complete:**
+  - **200 subjects** with all 14 required masks: 2800 NIfTI files, **278 MB on disk** out of
+    the 28.4 GB archive (about 1%);
+  - within the approved ~330 MB;
+  - the resumed run fetched the remaining 39 subjects (46.6 MB, 209 requests) and reused the
+    161 already on disk.
+- **Pipeline queued, all niced and detached:**
+  - mesh build and quality ranking of all 200 (`assets.quality --build-from`, about 70 s per
+    subject on the shared CPU);
+  - then shape-model build (`shapes.build`, log `datasets/processed/level2a/build.log`).
+- **Step 21:**
+  - Stage 1 points 400 and 600 are complete (reference plus 8 branches each); 700 is
+    running.
+  - Validity: each reference continuation reproduces frozen seed 9 exactly: 400 at 35 of
+    35 checkpoints, 600 at 31 of 31.
+  - Branch outcomes are not read until Stage 1 completes, per the preregistration.
