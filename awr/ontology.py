@@ -82,6 +82,8 @@ class AnatomyOntology:
     registry: RelationRegistry
     provenance: OntologyProvenance
     source_dir: Path | None = None
+    includes: tuple[str, ...] = ()
+    """Included ontologies as ``ontology_id@version``, in inclusion order."""
 
     # --- lookup -----------------------------------------------------------
     def __contains__(self, entity_id: object) -> bool:
@@ -360,11 +362,75 @@ def _build_relationships(
     return store
 
 
+def _merge_includes(
+    base: Path,
+    payloads: dict[str, dict[str, Any]],
+    registry: RelationRegistry | None,
+    chain: tuple[Path, ...],
+) -> tuple[dict[str, dict[str, Any]], tuple[str, ...]]:
+    """Prepend every included ontology's entities, tree nodes and edges to ``payloads``.
+
+    ``anatomy.json`` may declare ``includes``: a list of ``{"ontology_id", "version",
+    "path"}`` with ``path`` relative to the including ontology's directory. Each included
+    ontology is first loaded and validated on its own -- so its errors are reported against
+    its own files -- and must match the declared id and version exactly. Its raw content is
+    then merged *before* the including ontology's, and the ordinary validators run once over
+    the result. The included files are never modified, which is what lets a composite domain
+    reuse a frozen ontology.
+    """
+    specs = payloads["anatomy.json"].get("includes", ())
+    if not specs:
+        return payloads, ()
+    entities: list[Any] = []
+    nodes: list[Any] = []
+    edges: list[Any] = []
+    labels: list[str] = []
+    for index, spec in enumerate(specs):
+        try:
+            wanted_id = str(spec["ontology_id"])
+            wanted_version = str(spec["version"])
+            target = (base / str(spec["path"])).resolve()
+        except KeyError as exc:
+            raise OntologyError(
+                f"anatomy.json include #{index} is missing field {exc.args[0]!r}."
+            ) from exc
+        if target in chain:
+            cycle = " -> ".join(str(p) for p in (*chain, target))
+            raise OntologyError(f"Ontology include cycle: {cycle}.")
+        included = load_ontology(
+            target, expected_version=wanted_version, registry=registry, _chain=chain
+        )
+        if included.ontology_id != wanted_id:
+            raise OntologyError(
+                f"anatomy.json include #{index} expects {wanted_id!r} but {target} declares "
+                f"{included.ontology_id!r}."
+            )
+        raw = {name: _read_json(target / name) for name in _REQUIRED_FILES}
+        raw, nested = _merge_includes(target, raw, registry, (*chain, target))
+        entities.extend(raw["anatomy.json"].get("entities", ()))
+        nodes.extend(raw["hierarchy.json"].get("nodes", ()))
+        edges.extend(raw["relationships.json"].get("edges", ()))
+        labels.extend((*nested, f"{wanted_id}@{wanted_version}"))
+
+    merged = {name: dict(payload) for name, payload in payloads.items()}
+    merged["anatomy.json"]["entities"] = [
+        *entities,
+        *payloads["anatomy.json"].get("entities", ()),
+    ]
+    merged["hierarchy.json"]["nodes"] = [*nodes, *payloads["hierarchy.json"].get("nodes", ())]
+    merged["relationships.json"]["edges"] = [
+        *edges,
+        *payloads["relationships.json"].get("edges", ()),
+    ]
+    return merged, tuple(labels)
+
+
 def load_ontology(
     directory: str | Path,
     *,
     expected_version: str | None = None,
     registry: RelationRegistry | None = None,
+    _chain: tuple[Path, ...] = (),
 ) -> AnatomyOntology:
     """Load and validate an ontology from a directory of three JSON files.
 
@@ -377,7 +443,7 @@ def load_ontology(
 
     Raises:
         OntologyError: If any file is missing, malformed, version-mismatched or
-            internally inconsistent.
+            internally inconsistent, or if an included ontology is.
 
     """
     base = Path(directory)
@@ -396,19 +462,23 @@ def load_ontology(
             f"{base} declares {version!r}."
         )
 
+    ontology_ids = {str(payload.get("ontology_id", "")) for payload in payloads.values()}
+    if len(ontology_ids) != 1:
+        raise OntologyError(f"Ontology files disagree on ontology_id: {sorted(ontology_ids)}.")
+
+    payloads, includes = _merge_includes(
+        base, payloads, registry, (*_chain, base.resolve())
+    )
     anatomy = payloads["anatomy.json"]
     entities: dict[str, AnatomicalEntity] = {}
     for index, raw in enumerate(anatomy.get("entities", ())):
         entity = _build_entity(raw, index=index)
         if entity.entity_id in entities:
-            raise OntologyError(f"Duplicate entity id {entity.entity_id!r} in anatomy.json.")
+            where = "anatomy.json or an included ontology" if includes else "anatomy.json"
+            raise OntologyError(f"Duplicate entity id {entity.entity_id!r} in {where}.")
         entities[entity.entity_id] = entity
     if not entities:
         raise OntologyError(f"{base / 'anatomy.json'} declares no entities.")
-
-    ontology_ids = {str(payload.get("ontology_id", "")) for payload in payloads.values()}
-    if len(ontology_ids) != 1:
-        raise OntologyError(f"Ontology files disagree on ontology_id: {sorted(ontology_ids)}.")
 
     active_registry = registry or default_relation_registry()
     root_id, parent_of, children_of = _build_tree(payloads["hierarchy.json"], entities)
@@ -432,4 +502,5 @@ def load_ontology(
             details=dict(anatomy.get("provenance", {})),
         ),
         source_dir=base,
+        includes=includes,
     )
