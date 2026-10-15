@@ -27,6 +27,9 @@ dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10", "types-PyYAML>=6.0"]
 # Step 6 prototype: the only heavy dependencies, confined to the tier-2 packages
 # listed in docs/adr/0010-dependency-tiers.md. The AWR core never imports them.
 prototype = ["torch>=2.4,<3", "numpy>=1.26"]
+# Level 1 asset pipeline (ADR-L1-003): segmentations to meshes. Imported only by assets/
+# mesh building and its tests; the label map itself needs none of these.
+assets = ["numpy>=1.26", "nibabel>=5.2,<6", "scikit-image>=0.24,<1", "trimesh>=4.4,<5", "fast-simplification>=0.1.7,<1"]
 
 [project.scripts]
 lagnav-heart-demo = "experiments.heart_session_demo:main"
@@ -37,6 +40,7 @@ lagnav-experiment = "experiments.heart.run_experiment:main"
 [tool.setuptools]
 packages = [
   "awr",
+  "assets",
   "reasoning",
   "geometry",
   "generation",
@@ -61,7 +65,12 @@ packages = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-filterwarnings = ["error"]
+filterwarnings = [
+  "error",
+  # scikit-image's marching-cubes tables set .shape on an array, deprecated in NumPy 2.5.
+  # Third-party and harmless here; scoped to that message from skimage only.
+  "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:skimage.*",
+]
 markers = [
   "slow: end-to-end runs that train a model; deselect with -m 'not slow'",
 ]

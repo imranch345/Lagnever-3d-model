@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lagnav Thorax Viewer</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --panel: #ffffff; --ink: #1f2328; --muted: #646b73; --line: #dedad3;
+    --accent: #2f5fd0; --ok: #2c7a4b; --bad: #b3261e; --canvas: #e9e6e0; --chip: #efece6;
+    --warn-bg: #fff4d6; --warn-ink: #6b4e00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121417; --panel: #1a1d21; --ink: #e8e6e3; --muted: #9aa1a9; --line: #2c3036;
+      --accent: #7aa2ff; --ok: #6cc28f; --bad: #ff8a80; --canvas: #16191d; --chip: #23272c;
+      --warn-bg: #3a3016; --warn-ink: #f2d27a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121417; --panel: #1a1d21; --ink: #e8e6e3; --muted: #9aa1a9; --line: #2c3036;
+    --accent: #7aa2ff; --ok: #6cc28f; --bad: #ff8a80; --canvas: #16191d; --chip: #23272c;
+    --warn-bg: #3a3016; --warn-ink: #f2d27a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .app { display: grid; grid-template-columns: 340px 1fr; grid-template-rows: auto 1fr auto;
+    height: 100vh; }
+  .banner { grid-column: 1 / -1; background: var(--warn-bg); color: var(--warn-ink);
+    padding: 6px 16px; font-size: 12.5px; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+    padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 16px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  form { display: flex; gap: 6px; }
+  input[type=text] { flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { padding: 4px 9px; font-size: 12.5px; border-radius: 999px; }
+  .log { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 64px;
+    max-height: 180px; overflow-y: auto; font-size: 13px; white-space: pre-wrap; }
+  .log .ok { color: var(--ok); } .log .bad { color: var(--bad); }
+  .log .cmd { color: var(--muted); }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); margin: 0 0 6px; }
+  ul.tree { list-style: none; margin: 0; padding: 0; }
+  ul.tree li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  ul.tree li.group { font-weight: 600; margin-top: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; border: 1px solid var(--line); }
+  .name { flex: 1; cursor: pointer; }
+  .name:hover { text-decoration: underline; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px dashed var(--line); border-radius: 6px;
+    padding: 0 5px; }
+  .toggle { padding: 1px 7px; font-size: 12px; }
+  main { position: relative; background: var(--canvas); min-height: 300px; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: absolute; left: 12px; bottom: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font-size: 12.5px;
+    pointer-events: none; }
+  .hud:empty { display: none; }
+  .status { position: absolute; right: 12px; top: 12px; color: var(--muted); font-size: 12.5px; }
+  footer { grid-column: 1 / -1; border-top: 1px solid var(--line); background: var(--panel);
+    color: var(--muted); font-size: 12px; padding: 6px 16px; }
+  footer a { color: var(--accent); }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 52vh auto auto; height: auto; }
+    main { grid-row: 2; } aside { grid-row: 3; border-right: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="app">
+  <div class="banner" id="banner">Research data, not validated. Not for clinical use.</div>
+  <aside>
+    <div>
+      <h1>Heart and lungs</h1>
+      <div class="sub" id="lod">Loading…</div>
+    </div>
+    <form id="form" autocomplete="off">
+      <input type="text" id="text" placeholder="e.g. make the left ventricle transparent"
+             aria-label="Command">
+      <button class="primary" type="submit">Run</button>
+    </form>
+    <div class="chips" id="chips"></div>
+    <div class="log" id="log" aria-live="polite"></div>
+    <div>
+      <p class="section-title">Structures</p>
+      <ul class="tree" id="tree"></ul>
+    </div>
+  </aside>
+  <main>
+    <canvas id="view"></canvas>
+    <div class="hud" id="hud"></div>
+    <div class="status" id="status"></div>
+  </main>
+  <footer id="credits">Loading credits…</footer>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

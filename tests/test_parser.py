@@ -31,6 +31,8 @@ def test_every_documented_form_parses(parser: RuleBasedCommandParser, text: str)
     ("text", "intent"),
     [
         ("generate a human heart", Intent.GENERATE),
+        ("generate the heart and lungs", Intent.GENERATE),
+        ("build the thorax", Intent.GENERATE),
         ("Show the four chambers", Intent.SHOW),
         ("hide the valves", Intent.HIDE),
         ("hide everything except the chambers", Intent.ISOLATE),

@@ -1,0 +1,26 @@
+{
+  "ontology_id": "lagnav.thorax",
+  "title": "Thorax Ontology v0.1 - organisational hierarchy",
+  "version": "0.1.0",
+  "schema_version": "awr-ontology-1",
+  "status": "DRAFT_UNVALIDATED",
+  "description": "Presentation tree for the Level 1 scene. The included heart tree is attached unchanged under the thorax root; its own nodes come from ontology/heart/hierarchy.json.",
+  "root": "thorax",
+  "nodes": [
+    { "parent": "thorax", "children": ["heart", "respiratory.lungs", "respiratory.airways"] },
+    { "parent": "respiratory.lungs", "children": ["respiratory.left_lung", "respiratory.right_lung"] },
+    {
+      "parent": "respiratory.left_lung",
+      "children": ["respiratory.lung_upper_lobe_left", "respiratory.lung_lower_lobe_left"]
+    },
+    {
+      "parent": "respiratory.right_lung",
+      "children": [
+        "respiratory.lung_upper_lobe_right",
+        "respiratory.lung_middle_lobe_right",
+        "respiratory.lung_lower_lobe_right"
+      ]
+    },
+    { "parent": "respiratory.airways", "children": ["respiratory.trachea"] }
+  ]
+}

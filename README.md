@@ -54,6 +54,35 @@ interface and a `TODO`, not an invented answer.
 * Relational diagnostics, Steps 11–20: one report per step, linked from the table below
 * Decision records: [docs/adr/](docs/adr/)
 
+### Level 1: a heart and lungs you can talk to
+
+Alongside the research steps there is now a product track:
+**[docs/LEVEL_1_PLAN.md](docs/LEVEL_1_PLAN.md)**. Its goal is a language-controlled 3D heart and
+lungs, built from real CT, that runs locally in a browser. What exists so far:
+
+* a **thorax domain**. It includes Heart Ontology v0.1 unchanged and adds both lungs, five
+  lobes and the trachea (ADR-L1-001);
+* a **label map** from the TotalSegmentator v1 dataset (CC BY 4.0) to AWR entities, and a
+  **mesh pipeline** that writes one GLB node per entity, with a manifest that carries source,
+  license and quality (ADR-L1-002 to -004);
+* a **byte-range fetcher** that takes only the needed label files from the dataset's 28 GB
+  zip, and a **quality report** that picks a usable subject;
+* a **local viewer**. The `CommandEngine` stays the only writer of scene state, and the page
+  draws what `/state` says.
+
+Real CT has not been downloaded yet. Until it is, the viewer runs on a synthetic **phantom**:
+simple shapes placed where the structures sit, which is not anatomy.
+
+```bash
+pip install -e ".[dev,assets]"
+python -m assets.phantom --out datasets/raw/phantom
+python -m assets.meshes --subject datasets/raw/phantom/phantom --out datasets/processed/level1/phantom
+python -m viewer.server --scene datasets/processed/level1/phantom --port 8791
+```
+
+Then open `http://127.0.0.1:8791/` and type, for example, "show only the lungs" or
+"make the left ventricle transparent".
+
 ### What Step 7 changed about how to read Step 6
 
 Step 6 reported that the typed graph encoder was not earning its parameters. **That
@@ -436,7 +465,9 @@ animation/    Semantic cardiac flow and conduction model
 evaluation/   Anatomy coverage, geometry checks, consistency, benchmarks
 datasets/     Dataset schema, licensing policy, synthetic example, synthetic and
               whole-organ corpus generators
-ontology/     Versioned ontology data (Heart Ontology v0.1)
+ontology/     Versioned ontology data (Heart Ontology v0.1; Thorax Ontology v0.1 includes it)
+assets/       Level 1: label map, byte-range fetcher, mesh pipeline, quality report, phantom
+viewer/       Level 1: local server around the CommandEngine, and the three.js page
 configs/      Domain configuration, the (empty) model configuration, neural experiment configs
 experiments/  Runnable demonstrations, the pre-registered heart experiment, and the
               runners for Steps 7 to 20
