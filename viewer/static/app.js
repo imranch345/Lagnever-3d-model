@@ -46,13 +46,22 @@ const ROLE_LOOK = {
 let state = null;
 let hovered = null;
 
+// Until the person moves the camera, keep the whole scene framed: the pane can change size
+// after the first frame (a preview opening, a panel resizing), and a fit made at the old
+// size leaves the scene tiny or cropped.
+let userMoved = false;
+controls.addEventListener('start', () => { userMoved = true; });
+
 function resize() {
   const { clientWidth: w, clientHeight: h } = canvas.parentElement;
+  if (!w || !h) return;
   renderer.setSize(w, h, false);
-  camera.aspect = w / Math.max(h, 1);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (!userMoved && meshes.size) frameScene();
 }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(canvas.parentElement);
 
 function frameScene() {
   const box = new THREE.Box3();
