@@ -1,0 +1,77 @@
+{
+  "label_map_id": "totalsegmentator_v1-to-lagnav.thorax_0.1.0",
+  "version": "0.1.0",
+  "source": {
+    "dataset": "TotalSegmentator dataset: segmentations of 104 anatomical structures in 1204 CT images",
+    "version": "1.0",
+    "doi": "10.5281/zenodo.6802614",
+    "url": "https://zenodo.org/records/6802614",
+    "license": "CC BY 4.0",
+    "attribution": "Wasserthal J. et al., TotalSegmentator: robust segmentation of 104 anatomical structures in CT images. Dataset v1.0, Zenodo, 2022. CC BY 4.0."
+  },
+  "target_ontology": { "ontology_id": "lagnav.thorax", "version": "0.1.0" },
+  "classes": {
+    "aorta": 7,
+    "inferior_vena_cava": 8,
+    "lung_upper_lobe_left": 13,
+    "lung_lower_lobe_left": 14,
+    "lung_upper_lobe_right": 15,
+    "lung_middle_lobe_right": 16,
+    "lung_lower_lobe_right": 17,
+    "trachea": 43,
+    "heart_myocardium": 44,
+    "heart_atrium_left": 45,
+    "heart_ventricle_left": 46,
+    "heart_atrium_right": 47,
+    "heart_ventricle_right": 48,
+    "pulmonary_artery": 49
+  },
+  "crops": {
+    "thorax": "Keep only slices within the superior-inferior extent of the union of the five lung lobes."
+  },
+  "entities": [
+    {
+      "entity_id": "heart",
+      "labels": ["heart_myocardium", "heart_atrium_left", "heart_ventricle_left", "heart_atrium_right", "heart_ventricle_right"],
+      "note": "LOD-0 shell: union of the myocardium and the four chambers."
+    },
+    { "entity_id": "heart.myocardium", "labels": ["heart_myocardium"] },
+    { "entity_id": "heart.left_atrium", "labels": ["heart_atrium_left"] },
+    { "entity_id": "heart.left_ventricle", "labels": ["heart_ventricle_left"] },
+    { "entity_id": "heart.right_atrium", "labels": ["heart_atrium_right"] },
+    { "entity_id": "heart.right_ventricle", "labels": ["heart_ventricle_right"] },
+    {
+      "entity_id": "heart.pulmonary_trunk",
+      "labels": ["pulmonary_artery"],
+      "note": "The label covers the trunk and the proximal left and right pulmonary arteries; heart.pulmonary_arteries has no separate mesh."
+    },
+    {
+      "entity_id": "heart.aorta",
+      "labels": ["aorta"],
+      "crop": "thorax",
+      "note": "The label is the whole aorta; only its thoracic part is kept."
+    },
+    {
+      "entity_id": "heart.inferior_vena_cava",
+      "labels": ["inferior_vena_cava"],
+      "crop": "thorax",
+      "note": "The label runs into the abdomen; only its thoracic part is kept."
+    },
+    {
+      "entity_id": "respiratory.left_lung",
+      "labels": ["lung_upper_lobe_left", "lung_lower_lobe_left"],
+      "note": "LOD-0 shell: union of the two left lobes."
+    },
+    {
+      "entity_id": "respiratory.right_lung",
+      "labels": ["lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
+      "note": "LOD-0 shell: union of the three right lobes."
+    },
+    { "entity_id": "respiratory.lung_upper_lobe_left", "labels": ["lung_upper_lobe_left"] },
+    { "entity_id": "respiratory.lung_lower_lobe_left", "labels": ["lung_lower_lobe_left"] },
+    { "entity_id": "respiratory.lung_upper_lobe_right", "labels": ["lung_upper_lobe_right"] },
+    { "entity_id": "respiratory.lung_middle_lobe_right", "labels": ["lung_middle_lobe_right"] },
+    { "entity_id": "respiratory.lung_lower_lobe_right", "labels": ["lung_lower_lobe_right"] },
+    { "entity_id": "respiratory.trachea", "labels": ["trachea"] }
+  ]
+}
