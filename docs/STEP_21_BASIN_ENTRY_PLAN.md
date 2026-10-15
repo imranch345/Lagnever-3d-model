@@ -223,3 +223,47 @@ throughout.
   replaces the single-trajectory searches of Steps 16–19.
 * **C:** stop bisecting. Report the pattern, and reconsider whether "basin entry" is the right
   description before designing anything else.
+
+---
+
+## Amendment 1 — global RNG inside the teacher-forcing ramp
+
+*Added after the first Stage 1 run and before any rerun. Nothing above this line is changed.*
+
+**What happened.** The capture was valid. It reproduced frozen seed 9 at 18 of 18 shared
+checkpoints, and its 805 state equalled Step 20's. Stage 1 then ran at 400, 600 and 700, and
+**every reference failed to reproduce frozen seed 9**: only the branch-point checkpoint itself
+matched (1 of 35, 1 of 31, 1 of 29). By §6 that run is **invalid**. Its branch results are not
+interpreted here or anywhere else.
+
+**Cause, measured.** During `P1`, the teacher-forcing ramp (steps 180–719 at the frozen
+budget), the model draws a per-entity mask with `torch.rand` (`generation/neural/nn/model.py`).
+That consumes global RNG. `save_state` always saved global RNG, but `load_state` never restored
+it, because Step 20's audit had measured `train_step` consuming none. That measurement was made
+at 805, which is in `P2`, and it is true there. All three Stage 1 points lie inside the ramp.
+
+Continuing from the 400 state for 50 steps confirmed it. Without restoring RNG, step 450 gives
+usage 0.4435. With RNG restored it gives 0.2891, bit-identical to frozen seed 9.
+
+**Change.** `experiments/step20/state.py::load_state` now restores torch, Python and NumPy RNG
+from the saved state. §8's "reused **unchanged**" no longer holds for that one function. Three
+consequences:
+
+1. **Branches** now share the original run's RNG stream from the branch point. Data order is
+   then the only thing that differs, which is the intervention §3 describes. In the invalid run
+   every branch used the RNG state left by trainer construction instead.
+2. **Step 20 is unaffected.** Nothing consumes global RNG in `P2`, so restoring it cannot change
+   a continuation from 805. A test pins this: a `P2` state continues identically with RNG
+   scrambled.
+3. **The capture stands.** Its states already contain the RNG, so it is not re-run.
+
+**Tests added.** A state saved inside the ramp continues bit-identically to the uninterrupted
+run. Without its RNG, the same state diverges. After the ramp, the RNG does not matter. The
+original capture test missed this because its resume point was in `P0`.
+
+**Also added: a Stage 2 gate.** `stage2` runs the Stage 2 points only if every Stage 1 check
+passed: references reproduce, one starting fingerprint per point, eight distinct orderings, an
+identical replay at 400, and clean freeze manifests. Otherwise it runs nothing.
+
+**Rerun.** Stage 1 is run again in full, at the same points with the same seeds. The invalid
+run's files are kept, not deleted, in `experiments/runs/step21/ABANDONED_stage1_no_rng/`.

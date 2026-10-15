@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 
@@ -44,6 +46,7 @@ from experiments.step21.basin_entry import (
     classify_branch,
     next_points,
     reproduction,
+    stage_two_gate,
     state_path,
     summarise_point,
     verdict,
@@ -141,6 +144,51 @@ class TestTheCaptureIsExact:
         """A typo in the point list must fail, not silently capture nothing."""
         with pytest.raises(ValueError):
             capture_states(make_trainer(), points=(-1, 4), out_dir=tmp_path)
+
+
+def _resume(make_trainer, path: Path, stop: int, *, scramble_rng: bool = False) -> Any:
+    """Load a saved state and train on to ``stop`` with the original stream restored."""
+    trainer = make_trainer()
+    restored = load_state(trainer=trainer, path=path)
+    if scramble_rng:
+        torch.manual_seed(12345)
+        random.seed(12345)
+        np.random.seed(12345)
+    iterator = ResumableStream(trainer.train_loader).restore(restored["stream"])
+    for step in range(restored["step"], stop):
+        trainer.train_step(next(iterator), step)
+    return trainer
+
+
+class TestGlobalRngInsideTheTeacherForcingRamp:
+    """Amendment 1. At 40 steps the ramp is steps 6-23: P0 ends at 0.15, P2 starts at 0.60.
+
+    The model draws its teacher-forcing mask with ``torch.rand`` while the ratio is strictly
+    between 0 and 1, so a state saved inside the ramp continues exactly only with its RNG. The
+    first Stage 1 failed on this, and the original capture test above did not catch it because
+    its resume point, step 4, is in P0.
+    """
+
+    def test_a_state_inside_the_ramp_continues_exactly(self, make_trainer, tmp_path) -> None:
+        """load_state restores global RNG, so a mid-ramp reference is a true continuation."""
+        uninterrupted = make_trainer()
+        capture_states(uninterrupted, points=(10, 14), out_dir=tmp_path)
+        resumed = _resume(make_trainer, state_path(tmp_path, 10), 14)
+        assert _differing(_weights(uninterrupted), _weights(resumed)) == []
+
+    def test_the_ramp_does_consume_global_rng(self, make_trainer, tmp_path) -> None:
+        """Without the saved RNG the same state diverges -- the failure Stage 1 hit."""
+        uninterrupted = make_trainer()
+        capture_states(uninterrupted, points=(10, 14), out_dir=tmp_path)
+        scrambled = _resume(make_trainer, state_path(tmp_path, 10), 14, scramble_rng=True)
+        assert _differing(_weights(uninterrupted), _weights(scrambled)) != []
+
+    def test_after_the_ramp_global_rng_is_not_consumed(self, make_trainer, tmp_path) -> None:
+        """In P2 the RNG cannot matter: why Step 20's 805 result is unaffected by the fix."""
+        uninterrupted = make_trainer()
+        capture_states(uninterrupted, points=(26, 30), out_dir=tmp_path)
+        scrambled = _resume(make_trainer, state_path(tmp_path, 26), 30, scramble_rng=True)
+        assert _differing(_weights(uninterrupted), _weights(scrambled)) == []
 
 
 class TestStepZeroSeparatesInitialisationFromOrder:
@@ -325,6 +373,60 @@ class TestThePointSummary:
         assert summarise_point(branches, replay=replay)["replay_identical"] is True
         replay["trajectory"] = [{**replay["trajectory"][0], "graph_usage_deg": 2.4}]
         assert summarise_point(branches, replay=replay)["replay_identical"] is False
+
+
+def _valid_summary() -> dict[str, Any]:
+    points = {
+        str(p): {
+            "verdict": "unanimous",
+            "reference_reproduces": True,
+            "distinct_starting_fingerprints": 1,
+            "distinct_first_batches": 8,
+        }
+        for p in STAGE_ONE
+    }
+    points[str(STAGE_ONE[0])]["replay_identical"] = True
+    return {"points": points, "freezes": {"a.sha256": {"ok": 3, "bad": 0}}, "stage_two": [200, 0]}
+
+
+class TestTheStageTwoGate:
+    """Stage 2 is chosen from Stage 1 only when Stage 1 may be read at all."""
+
+    def test_a_valid_stage_one_passes(self) -> None:
+        """Every check satisfied: nothing blocks."""
+        assert stage_two_gate(_valid_summary()) == []
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("reference_reproduces", False),
+            ("distinct_starting_fingerprints", 2),
+            ("distinct_first_batches", 7),
+        ],
+    )
+    def test_any_failed_integrity_check_blocks(self, field: str, value: Any) -> None:
+        """A failed reference is what invalidated the first Stage 1."""
+        summary = _valid_summary()
+        summary["points"]["600"][field] = value
+        assert any(problem.startswith("600:") for problem in stage_two_gate(summary))
+
+    def test_an_incomplete_stage_one_blocks(self) -> None:
+        """Choosing from a partial Stage 1 would be choosing after seeing part of it."""
+        summary = _valid_summary()
+        summary["points"]["700"] = {"incomplete": ["branch_00"]}
+        assert "700: incomplete" in stage_two_gate(summary)
+
+    def test_a_missing_replay_blocks(self) -> None:
+        """Determinism has to be shown, not assumed."""
+        summary = _valid_summary()
+        del summary["points"]["400"]["replay_identical"]
+        assert stage_two_gate(summary) != []
+
+    def test_a_changed_freeze_manifest_blocks(self) -> None:
+        """A prior step's artifacts changing is a stop condition."""
+        summary = _valid_summary()
+        summary["freezes"]["a.sha256"] = {"ok": 2, "bad": 1}
+        assert stage_two_gate(summary) != []
 
 
 class TestReproductionAndFreezes:

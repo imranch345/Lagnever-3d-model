@@ -16,8 +16,12 @@ What exact continuation actually requires here, established by audit rather than
 * **the step counter** -- the learning-rate schedule is a pure function of the step
   (``_learning_rate``), so there is no separate scheduler state to save;
 * **the data stream's position** -- see :class:`StreamState`;
-* **global RNG** is *not* required: ``train_step`` was measured not to consume it. It is saved
-  anyway, so a future change that starts consuming it cannot silently invalidate a branch.
+* **global RNG** -- *required inside the teacher-forcing ramp*. Step 20 measured ``train_step``
+  consuming none at step 805, which holds there: 805 is in ``P2``, where the ratio is zero. But
+  during ``P1`` (steps 180-719 at the frozen budget) the model draws a per-entity mask with
+  ``torch.rand`` (``generation/neural/nn/model.py``). Step 21 found this by branching inside the
+  ramp, where a reference that did not restore RNG failed to reproduce frozen seed 9. The state
+  always saved RNG; :func:`load_state` now restores it.
 
 The data stream is the subtle one. ``WholeOrganLoader.epoch`` draws twice from its own generator to
 build a whole epoch's batch list up front, then yields from it, and ``infinite`` counts epochs in a
@@ -139,8 +143,8 @@ def save_state(
         "optimizer": trainer.optimizer.state_dict(),
         "stream": stream.state().to_payload(),
         "config": trainer.config.to_dict(),
-        # Not required for continuation -- train_step was measured not to consume global RNG --
-        # but saved so a future change cannot invalidate a branch without being noticed.
+        # Required inside the teacher-forcing ramp, where the model draws its mask with
+        # torch.rand; not consumed in P0 or P2. Restored by load_state.
         "torch_rng": torch.get_rng_state(),
         "python_rng": random.getstate(),
         "numpy_rng": np.random.get_state(),
@@ -150,10 +154,19 @@ def save_state(
 
 
 def load_state(*, trainer: Any, path: Path) -> dict[str, Any]:
-    """Restore model and optimiser in place; return the step and stream position."""
+    """Restore model, optimiser and global RNG in place; return the step and stream position.
+
+    A branch reseeds only the loader's own generator afterwards, so restoring global RNG here
+    keeps the teacher-forcing draws identical across branches and the reference -- data order
+    remains the only thing a branch changes. Outside the ramp nothing consumes global RNG, so
+    this changes no continuation from a ``P0`` or ``P2`` state, Step 20's 805 included.
+    """
     payload = torch.load(path, map_location="cpu", weights_only=False)
     trainer.model.load_state_dict(payload["model"])
     trainer.optimizer.load_state_dict(payload["optimizer"])
+    torch.set_rng_state(payload["torch_rng"])
+    random.setstate(payload["python_rng"])
+    np.random.set_state(payload["numpy_rng"])
     return {
         "step": int(payload["step"]),
         "stream": StreamState.from_payload(payload["stream"]),

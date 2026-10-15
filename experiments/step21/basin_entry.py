@@ -30,8 +30,13 @@ What is new is small:
     applies the preregistered verdicts and, once Stage 1 is complete, names the Stage 2 points the
     plan's table selects.
 
+``stage2``
+    summarises, refuses to go on unless every Stage 1 integrity check passed (``stage_two_gate``),
+    then runs exactly the points the table selected -- or nothing, for a non-monotone Stage 1.
+
     python -m experiments.step21.basin_entry capture
     python -m experiments.step21.basin_entry run --points 400 600 700 --replay-point 400
+    python -m experiments.step21.basin_entry stage2
     python -m experiments.step21.basin_entry summarise
 """
 
@@ -68,6 +73,7 @@ __all__ = [
     "main",
     "next_points",
     "reproduction",
+    "stage_two_gate",
     "summarise_point",
     "verdict",
     "verify_freezes",
@@ -393,6 +399,33 @@ def _measured(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return [{key: value for key, value in row.items() if key != "seconds"} for row in rows]
 
 
+def stage_two_gate(summary: Mapping[str, Any]) -> list[str]:
+    """Every reason Stage 2 must not start; empty only when Stage 1 is complete and valid.
+
+    The plan's section 6 makes a failed reference invalidate everything after it, so a Stage 2
+    chosen from an unchecked Stage 1 would be chosen from results nobody may read.
+    """
+    problems: list[str] = []
+    for point in STAGE_ONE:
+        entry = summary["points"].get(str(point))
+        if entry is None or "verdict" not in entry:
+            problems.append(f"{point}: incomplete")
+            continue
+        if entry["reference_reproduces"] is not True:
+            problems.append(f"{point}: reference does not reproduce frozen seed 9")
+        if entry["distinct_starting_fingerprints"] != 1:
+            problems.append(f"{point}: branches did not all start from one state")
+        if entry["distinct_first_batches"] != len(BRANCH_SEEDS):
+            problems.append(f"{point}: branch orderings are not all distinct")
+    first = summary["points"].get(str(STAGE_ONE[0]), {})
+    if first.get("replay_identical") is not True:
+        problems.append(f"{STAGE_ONE[0]}: determinism replay missing or not identical")
+    changed = [name for name, counts in summary["freezes"].items() if counts["bad"]]
+    if changed:
+        problems.append(f"freeze manifests changed: {changed}")
+    return problems
+
+
 def verify_freezes(root: Path = RUNS_ROOT) -> dict[str, dict[str, int]]:
     """Every ``*FROZEN*.sha256`` manifest under ``root``, checked file by file."""
     result: dict[str, dict[str, int]] = {}
@@ -446,7 +479,7 @@ def summarise(out_dir: Path) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description="Step 21 basin entry by branching.")
-    parser.add_argument("mode", choices=("capture", "run", "continue", "summarise"))
+    parser.add_argument("mode", choices=("capture", "run", "continue", "stage2", "summarise"))
     parser.add_argument("--corpus", type=Path, default=CORPUS)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--points", type=int, nargs="+", default=list(STAGE_ONE))
@@ -490,6 +523,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     report = summarise(args.out)
     (args.out / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    if args.mode == "stage2":
+        problems = stage_two_gate(report)
+        for problem in problems:
+            print(f"[step21] Stage 2 blocked: {problem}")
+        if problems:
+            return 1
+        if not report["stage_two"]:
+            print("[step21] non-monotone Stage 1: no Stage 2 (plan section 6, outcome C)")
+            return 0
+        print(f"[step21] Stage 2: {report['stage_two']}", flush=True)
+        failures = run_points(
+            points=report["stage_two"], replay_point=None, out_dir=args.out, jobs=args.jobs
+        )
+        return 1 if failures else 0
     for point, entry in report["points"].items():
         shown = entry.get("verdict", f"incomplete {entry.get('incomplete')}")
         print(f"point {point:>4}: {shown}  ({entry.get('escaped', '?')}/8)")
