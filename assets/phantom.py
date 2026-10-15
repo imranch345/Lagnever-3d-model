@@ -5,8 +5,9 @@ so the mesh pipeline can be tested against known answers and the viewer can be d
 before any real data is downloaded. Written in the TotalSegmentator v1 file layout.
 
 Positions are RAS+ millimetres with the heart at the origin; the subject's left is negative x.
-Lungs span z from -55 to 70, and the aorta and IVC run below them so the thorax crop has
-something to remove. Needs the ``assets`` extra.
+Lobes of one lung touch, and the heart's parts touch, as in real anatomy, so each organ
+is one connected piece. Lungs span z from about -50 to 62, and the aorta and IVC run below
+them so the thorax crop has something to remove. Needs the ``assets`` extra.
 
     python -m assets.phantom --out datasets/raw/phantom
 """
@@ -60,16 +61,16 @@ LAYOUT: Mapping[str, Shape] = {
     "heart_ventricle_left": sphere((-15, 0, -10), 12),
     "heart_ventricle_right": sphere((10, 10, -10), 12),
     "heart_atrium_left": sphere((-12, -15, 10), 10),
-    "heart_atrium_right": sphere((15, -5, 10), 10),
+    "heart_atrium_right": sphere((12, -3, 6), 12),
     "heart_myocardium": _shell((-15, 0, -10), 16, 12),
     "pulmonary_artery": sphere((0, 15, 22), 8),
     "aorta": cylinder(-10, -22, 8, -75, 60),
     "inferior_vena_cava": cylinder(20, -15, 7, -78, -5),
     "lung_upper_lobe_left": ellipsoid((-60, 0, 30), (25, 35, 30)),
-    "lung_lower_lobe_left": ellipsoid((-60, 0, -25), (25, 35, 25)),
-    "lung_upper_lobe_right": ellipsoid((60, 0, 45), (25, 35, 22)),
+    "lung_lower_lobe_left": ellipsoid((-60, 0, -22), (25, 35, 25)),
+    "lung_upper_lobe_right": ellipsoid((60, 0, 40), (25, 35, 22)),
     "lung_middle_lobe_right": ellipsoid((60, 20, 8), (20, 15, 12)),
-    "lung_lower_lobe_right": ellipsoid((60, -5, -30), (25, 30, 22)),
+    "lung_lower_lobe_right": ellipsoid((60, 5, -22), (25, 30, 22)),
     "trachea": cylinder(0, -10, 8, 50, 75),
 }
 

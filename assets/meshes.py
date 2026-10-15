@@ -44,6 +44,8 @@ from awr.ontology import AnatomyOntology, load_ontology
 
 __all__ = [
     "RAS_TO_VIEWER",
+    "boundary_faces",
+    "significant_pieces",
     "MeshParameters",
     "MeshQuality",
     "build_subject",
@@ -89,6 +91,39 @@ class MeshQuality:
     centroid_mm: list[float]
     bounds_mm: list[list[float]]
     notes: list[str] = field(default_factory=list)
+    touches_boundary: list[str] = field(default_factory=list)
+    """Faces of the scanned volume the mask reaches (RAS+ names). A structure that touches the
+    superior or inferior face was probably cut off by the scan's field of view."""
+    voxel_components: int = 0
+    """Connected pieces of the mask (6-connectivity) at least ``min_component_fraction`` of the
+    largest. Unlike ``components``, which counts surfaces, a hollow structure such as the
+    myocardium is one piece here."""
+
+
+_FACES = (("right", 0, -1), ("left", 0, 0), ("anterior", 1, -1), ("posterior", 1, 0),
+          ("superior", 2, -1), ("inferior", 2, 0))
+
+
+def significant_pieces(mask: BoolArray, fraction: float) -> int:
+    """Connected voxel pieces at least ``fraction`` of the largest one."""
+    labelled = measure.label(mask, connectivity=1)
+    sizes = np.bincount(labelled.ravel())[1:]
+    if sizes.size == 0:
+        return 0
+    return int((sizes >= fraction * sizes.max()).sum())
+
+
+def boundary_faces(mask: BoolArray) -> list[str]:
+    """Which faces of the (RAS+, canonical) volume a mask touches.
+
+    In a canonical RAS+ grid, voxel index grows towards right, anterior and superior, so the
+    last slice along an axis is that direction's face and the first is the opposite one.
+    """
+    touched = []
+    for name, axis, index in _FACES:
+        if np.take(mask, index, axis=axis).any():
+            touched.append(name)
+    return touched
 
 
 def read_mask(path: Path) -> tuple[BoolArray, FloatArray]:
@@ -218,6 +253,10 @@ def build_subject(
             continue
         meshes[entry.entity_id], qualities[entry.entity_id] = mask_to_mesh(
             mask, affine, parameters
+        )
+        qualities[entry.entity_id].touches_boundary = boundary_faces(mask)
+        qualities[entry.entity_id].voxel_components = significant_pieces(
+            mask, parameters.min_component_fraction
         )
 
     if "heart" not in meshes:
