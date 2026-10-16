@@ -133,11 +133,11 @@ Step 7 rebuilt the data so the question is answerable, and found four further de
 the same kind before any conclusion could be drawn. The details are in
 [docs/step7/02_preregistration_amendments.md](docs/step7/02_preregistration_amendments.md).
 
-### Steps 11 to 20, in one table
+### Steps 11 to 21, in one table
 
 Step 10 left a gap. A lookup keyed on entity identity **and** the relationship graph reaches
 11.57° of rotation error on `test_seen`; A3, reading the same inputs, reaches 21.38°. Steps
-11 to 20 asked where that relational information is lost.
+11 to 21 asked where that relational information is lost.
 
 | step | question | answer |
 | --- | --- | --- |
@@ -151,6 +151,7 @@ Step 10 left a gap. A lookup keyed on entity identity **and** the relationship g
 | [18](docs/STEP_18_ONSET_AND_REPLICATION_REPORT.md) | Does that lead survive a dense baseline and a second seed? | No. The transition spans steps 810–820, and the null replicates on seed 3. |
 | [19](docs/STEP_19_GRADIENT_DIRECTION_REPORT.md) | Does the gradient's direction change first? | No. Successive gradients stay aligned at +0.844 and nearly orthogonal to the net displacement. |
 | [20](docs/STEP_20_CHECKPOINT_BRANCHING_REPORT.md) | From seed 9's step-805 state, does data ordering decide the outcome? | No. All 8 branches escape, at steps 830–840, to a final rotation of 20.988° ± 0.023°. |
+| [21](docs/STEP_21_BASIN_ENTRY_REPORT.md) | How early is the outcome fixed? Branching at 700, 600, 400, 200 and 0 | **From initialisation.** 48 of 48 branches escape, including all 8 from step 0. Ordering moves the escape between steps 700 and 865, but never stops it. |
 
 Two things follow. Every architectural and objective explanation tested has been ruled out,
 and the escape is already fixed in the model's state before any trajectory measurement sees
@@ -158,9 +159,9 @@ it coming. And escape is not the whole gap: on validation a graph-using seed sti
 21° against the lookup's 12.24°, and A3, averaged over three seeds, captures 15.2% of the
 available relational improvement.
 
-**Next, not started:** Step 20's full-state checkpointing makes two experiments cheap.
-Branching seed 9 earlier (700, 600, 400) would find when the outcome is fixed, and branching
-a non-escaping seed would show whether that outcome is fixed too.
+**Next, not started:** Step 22 branches a non-escaping seed (seed 5) at step 0. If its
+outcome is fixed from initialisation too, both modes are set by the starting weights, and
+the question becomes what distinguishes the two starts (Step 21 report, §8).
 
 ### Step 10, in one table
 
