@@ -353,7 +353,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("No validity.json beside the model: resizing is off.", flush=True)
 
-    app = ViewerApp(args.scene, sampler=sampler, resizer=resizer)
+    # Generated and resized scenes go beside the model, never among the real subjects, where
+    # the quality report would count them as scans.
+    samples_dir = args.model.parent.parent / "viewer_scenes" if args.model is not None else None
+    app = ViewerApp(args.scene, sampler=sampler, resizer=resizer, samples_dir=samples_dir)
     server = make_server(app, args.port)
     print(f"Lagnav viewer on http://127.0.0.1:{server.server_address[1]}/", flush=True)
     try:

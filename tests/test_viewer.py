@@ -47,6 +47,42 @@ def engine() -> CommandEngine:
 class TestSceneState:
     """What the page is told."""
 
+    def test_an_organ_without_geometry_for_its_lod_falls_back(self) -> None:
+        """Generated scenes have lung shells but no lobes: the shell is drawn, AWR unchanged."""
+        engine = CommandEngine(config=load_domain_config(domain="thorax"))
+        engine.execute("generate the heart and lungs")
+        modelled = [
+            "heart.left_atrium",
+            "heart.left_ventricle",
+            "heart.right_atrium",
+            "heart.right_ventricle",
+            "heart.myocardium",
+            "respiratory.left_lung",
+            "respiratory.right_lung",
+        ]
+        generated = {"entities": {e: {} for e in modelled}}
+        real = {
+            "entities": {e: {} for e in [*modelled, "heart", "respiratory.lung_upper_lobe_left"]}
+        }
+
+        def flags(manifest: dict[str, Any], entity: str) -> tuple[bool, bool]:
+            state = scene_state(engine, manifest)
+            e = next(x for x in state["entities"] if x["id"] == entity)
+            return e["visible"], e["drawn"]
+
+        # LOD 1: lobes are the chosen representation; generated scenes have none.
+        assert flags(generated, "respiratory.left_lung") == (False, True)
+        assert flags(real, "respiratory.left_lung") == (False, False)
+        assert flags(real, "respiratory.lung_upper_lobe_left") == (True, True)
+        assert flags(generated, "heart.left_ventricle") == (True, True)
+        # LOD 0: the heart shell is chosen; without its geometry, the chambers stand in.
+        engine.execute("show less detail")
+        assert flags(generated, "heart.left_ventricle") == (False, True)
+        assert flags(real, "heart.left_ventricle") == (False, False)
+        # Hidden by request: nothing falls back.
+        engine.execute("hide the lungs")
+        assert flags(generated, "respiratory.left_lung") == (False, False)
+
     def test_geometry_is_flagged_only_where_a_mesh_exists(self, engine) -> None:
         """Valves are in the scene but must be marked as having no shape."""
         entities = {e["id"]: e for e in scene_state(engine, MANIFEST)["entities"]}

@@ -78,6 +78,50 @@ def animation_schedule(engine: CommandEngine) -> dict[str, Any] | None:
     }
 
 
+def _mark_drawn(entities: list[dict[str, Any]]) -> None:
+    """Set ``drawn``: what the page shows. It is the AWR's visibility, plus one fallback.
+
+    An organ is shown either as its shell or as its parts (the LOD policy). A scene can have
+    geometry for only one of the two. A generated thorax, for instance, has lung shells but no
+    lobes, and chambers but no heart shell. When every visible member of the chosen
+    representation lacks geometry, the other representation is drawn instead, so the organ
+    does not vanish. ``visible``, what the AWR says, is left as it is.
+    """
+    by_id = {e["id"]: e for e in entities}
+    children: dict[str, list[str]] = {}
+    for e in entities:
+        if e["parent"]:
+            children.setdefault(e["parent"], []).append(e["id"])
+
+    def parts(entity_id: str) -> list[dict[str, Any]]:
+        """Renderable descendants, reached through organisational groups only."""
+        found: list[dict[str, Any]] = []
+        for child_id in children.get(entity_id, []):
+            child = by_id[child_id]
+            if child["renderable"]:
+                found.append(child)
+            elif child["group"]:
+                found.extend(parts(child_id))
+        return found
+
+    for e in entities:
+        e["drawn"] = bool(e["visible"] and e["has_geometry"])
+    for shell in entities:
+        if not shell["renderable"]:
+            continue
+        members = parts(shell["id"])
+        if not members:
+            continue
+        shown = [m for m in members if m["visible"]]
+        if not shell["visible"] and shell["has_geometry"] and shown:
+            if not any(m["has_geometry"] for m in shown):
+                shell["drawn"] = True
+        if shell["visible"] and not shell["has_geometry"]:
+            for member in members:
+                if member["has_geometry"]:
+                    member["drawn"] = True
+
+
 def scene_state(engine: CommandEngine, manifest: Mapping[str, Any]) -> dict[str, Any]:
     """The scene as the page draws it.
 
@@ -108,6 +152,7 @@ def scene_state(engine: CommandEngine, manifest: Mapping[str, Any]) -> dict[str,
                 "size": round(float(state.transform.scale[0]), 4),
             }
         )
+    _mark_drawn(entities)
     source = manifest.get("source", {})
     return {
         "scene_version": scene.version,

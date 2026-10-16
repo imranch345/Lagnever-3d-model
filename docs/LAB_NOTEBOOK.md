@@ -377,3 +377,19 @@ distance from 50 random samples to the nearest training shape.
 
 **Evidence:** `datasets/processed/level2a/report.json`, `build.log` and `models/` (local
 data); code at `8fc2d04` + `f1bdcd4`.
+
+## 2026-10-16 (13:05) — First generated thorax in the viewer
+
+- **Seed 1** from the joint model passes the quality checks and appears with its banner and
+  credits (`docs/evidence/2026-10-16_generated_thorax_seed1.jpg`). "Hide the lungs" works on
+  generated anatomy as on real anatomy.
+- **Problem found by looking.** On the first try the generated lungs were invisible. At the
+  default level of detail the engine shows a lung as its lobes, and a generated scene has
+  lung shells but no lobes. The same happens at LOD 0 for the heart, which has no generated
+  shell.
+- **Fix.** The viewer's state now carries `drawn`. When every visible member of an organ's
+  chosen representation lacks geometry, the other representation is drawn. The AWR's
+  `visible` is unchanged, and real scenes, which have both, draw exactly as before. This is
+  covered by a test.
+- **Second fix.** The viewer wrote generated scenes to `real/samples/`, where the next quality
+  run would have counted them as scans. They now go to `level2a/viewer_scenes/`.
