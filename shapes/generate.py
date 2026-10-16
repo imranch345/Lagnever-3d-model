@@ -29,7 +29,13 @@ from assets.quality import assess
 from awr.ontology import AnatomyOntology, load_ontology
 from shapes.joint import JointModel
 
-__all__ = ["draw_coefficients", "entity_entry", "model_mesh", "write_sample_scene"]
+__all__ = [
+    "draw_coefficients",
+    "entity_entry",
+    "model_mesh",
+    "write_sample_scene",
+    "write_valid_sample_scene",
+]
 
 MEDICAL_STATUS = (
     "generated anatomy from a statistical shape model; not a measurement of anyone; "
@@ -72,6 +78,78 @@ def entity_entry(entity_id: str, mesh: trimesh.Trimesh) -> dict[str, Any]:
     return {"node": entity_id, "centroid_viewer_mm": centroid, "quality": asdict(quality)}
 
 
+#: Tries before a validity-filtered draw falls back to the always-valid spread.
+MAX_TRIES = 6
+#: The spread at which every sample passed the validity sweep (Level 2a report, section 6).
+FALLBACK_SPREAD = 0.5
+
+
+def write_valid_sample_scene(
+    joint: JointModel,
+    out_dir: Path,
+    *,
+    seed: int,
+    limits: Any,
+    spread: float = 1.0,
+    max_tries: int = MAX_TRIES,
+    provenance: Mapping[str, Any] | None = None,
+    ontology: AnatomyOntology | None = None,
+) -> dict[str, Any]:
+    """A sample at ``spread`` that passes the validity checks, or the fallback, written.
+
+    Draws are made from the seed's own sequence (``seed * 1000 + try``), so a seed always gives
+    the same thorax. A draw is kept only if it passes every check.
+    - Kept samples at 1 SD are as far from their nearest training subject as a new real person
+      is (8.8 mm against 9.1 mm median; report, section 6).
+    - Unfiltered, one draw in five fails a check.
+    - If no draw in ``max_tries`` passes, the thorax is drawn at ``FALLBACK_SPREAD``, where all
+      50 swept samples passed, and the manifest says so.
+    """
+    from shapes.validity import face_normals, judge, measure
+
+    ontology = ontology or load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+    mean = joint.split(joint.model.mean)
+    normals = {e: face_normals(mean[e], joint.faces[e]) for e in joint.entities}
+    rejected: list[list[str]] = []
+    for attempt in range(max_tries):
+        drawn = draw_coefficients(joint.model.n_modes, seed * 1000 + attempt, spread, clip=3.0)
+        failures = judge(
+            measure(joint.sample_entities(drawn), joint.faces, normals), limits, ontology
+        )
+        if not failures:
+            return write_sample_scene(
+                joint,
+                out_dir,
+                seed=seed,
+                spread=spread,
+                provenance=provenance,
+                ontology=ontology,
+                limits=limits,
+                coefficients=drawn,
+                sampler={
+                    "kind": f"gaussian at {spread:g} SD, kept only if valid",
+                    "tries": attempt + 1,
+                    "rejected": rejected,
+                },
+            )
+        rejected.append([message for _, message in failures][:3])
+    return write_sample_scene(
+        joint,
+        out_dir,
+        seed=seed,
+        spread=FALLBACK_SPREAD,
+        provenance=provenance,
+        ontology=ontology,
+        limits=limits,
+        sampler={
+            "kind": f"fallback to {FALLBACK_SPREAD:g} SD after {max_tries} rejected draws at "
+            f"{spread:g} SD",
+            "tries": max_tries,
+            "rejected": rejected,
+        },
+    )
+
+
 def write_sample_scene(
     joint: JointModel,
     out_dir: Path,
@@ -81,14 +159,19 @@ def write_sample_scene(
     provenance: Mapping[str, Any] | None = None,
     ontology: AnatomyOntology | None = None,
     limits: Any = None,
+    coefficients: Sequence[float] | None = None,
+    sampler: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Draw, mesh, measure and write one sample; return its manifest.
 
     With ``limits`` (``shapes.validity.Limits``), the sample also goes through the validity
-    checks, and the manifest records the verdict under ``validity``.
+    checks, and the manifest records the verdict under ``validity``. ``coefficients`` are used
+    as given instead of being drawn from ``seed``; ``sampler`` describes how they were chosen.
     """
     ontology = ontology or load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
-    coefficients = draw_coefficients(joint.model.n_modes, seed, spread)
+    if coefficients is None:
+        coefficients = draw_coefficients(joint.model.n_modes, seed, spread)
+    coefficients = [float(c) for c in coefficients]
     vertices = joint.sample_entities(coefficients)
 
     scene = trimesh.Scene()
@@ -116,6 +199,7 @@ def write_sample_scene(
             "coefficients": coefficients,
             "modes": joint.model.n_modes,
             "training_subjects": len(joint.model.subjects),
+            **({"sampler": dict(sampler)} if sampler else {}),
         },
         "ontology": {"ontology_id": ontology.ontology_id, "version": ontology.version},
         "source": {

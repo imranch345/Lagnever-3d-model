@@ -487,3 +487,32 @@ data); code at `8fc2d04` + `f1bdcd4`.
     - every raw source has a recorded licence, URL and attribution;
     - binary files appear only in the derived level1/ and level2a/ folders, which carry
       their provenance.
+
+## 2026-10-16 (17:30) — Which sampler: plausibility against novelty
+
+- **Question.** Can generated thoraxes be both plausible and as varied as real people? So
+  far, 0.5 SD passed every check but sat close to the training set, and 1 SD failed one
+  sample in five.
+- **Novelty measured** as the mean vertex distance to the nearest training subject, median
+  over 50 samples:
+  - a new real person (held out): 9.1 mm;
+  - Gaussian 0.5 SD: 6.7 mm;
+  - Gaussian 1 SD: 9.05 mm;
+  - kernel density around training subjects: 4.5 mm at h = 0.25, 6.9 mm at h = 0.5.
+- **Negative result: kernel density.**
+  - At h = 0.25, 88% pass, but each sample is a near-copy of a training subject (4.5 mm).
+  - At h = 0.5 it is no more novel than Gaussian 0.5 SD, and passes less often (86%).
+  - Rejected.
+- **Gaussian 1 SD, filtered by validity.**
+  - 40 of 50 draws kept.
+  - Kept samples are 8.8 mm from training, about a new person's 9.1 mm.
+  - |b| of kept samples is 4.03, against 3.96 for real training subjects.
+- **Decision** (ADR-L2-002). `write_valid_sample_scene`:
+  - draws at 1 SD from the seed's own sequence and keeps the first valid draw;
+  - after 6 rejected draws, falls back to 0.5 SD;
+  - records every rejected draw in the manifest.
+  The viewer uses it. Tested: every shown sample passes, a seed repeats exactly, and the
+  fallback is recorded.
+- **Also.** Resize now builds neighbour meshes once per request (`c6ac22e`). A profile puts
+  98% of check time in trimesh's pure-Python ray test. A faster inside test would change the
+  overlap measure and need recalibration, so it is deferred.

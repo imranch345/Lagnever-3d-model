@@ -30,7 +30,9 @@ model. It is not a measurement of anyone.
   - At 0.5 SD every sample passes checks calibrated on real anatomy (50 of 50).
   - At 1 SD, 78% pass, against 90.5% of real held-out subjects. The gap is mostly the left
     atrium pushed into the right lung.
-  - The viewer samples at 0.5 SD.
+  - Kept only if they pass, 1 SD draws are as novel as a new real person (8.8 against 9.1
+    mm to the nearest training subject). The viewer generates this way (ADR-L2-002).
+  - Sampling around training subjects was tested and rejected: it copies.
 * **Control.** A sentence resizes one structure within its own model. On a real heart,
   shrinking works across the range: LV −15% is applied, at 0.6 mm from plain scaling.
   Growing is refused beyond 2–6%, because neighbours do not give way in a linear model; the
@@ -181,6 +183,24 @@ every generated scene records its own validity verdict.
   modes fold thin regions.
 * **Variety at 0.5 SD is limited.** Each weight is half a standard deviation. Generated
   thoraxes are plausible, but closer to average than real people are.
+
+**Plausible and as new as a real person: the sampler used** (ADR-L2-002). Novelty is the mean
+vertex distance from a sample to its nearest training subject, median over 50 samples:
+
+| sampler | novelty | validity |
+| --- | --- | --- |
+| *a new real person (held out)* | *9.1 mm* | *90.5%* |
+| Gaussian, 0.5 SD | 6.7 mm | 100% |
+| Gaussian, 1 SD | 9.05 mm | 78% |
+| around training subjects (kernel density), h = 0.25 SD | 4.5 mm | 88% |
+| around training subjects, h = 0.5 SD | 6.9 mm | 86% |
+| **Gaussian, 1 SD, kept only if valid** | **8.8 mm** | **100% of shown** (40 of 50 draws kept) |
+
+- **Kernel density does not help.** It buys plausibility by staying near real subjects; at
+  h = 0.25 a sample is half as novel as a new person. Recorded as a negative result.
+- **The viewer now draws at 1 SD and keeps a draw only if it passes**, retrying from the
+  seed's own sequence. Shown thoraxes are as novel as a new person, and each passes the
+  checks.
 
 ## 7. Control: resizing one structure
 

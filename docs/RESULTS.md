@@ -52,7 +52,7 @@ signals.
 | P3 | Data is efficient to acquire. | 20 subjects for 32.6 MB of a 28.4 GB archive (HTTP byte ranges); 200 subjects later fetched the same way | `assets/fetch.py`, notebook 2026-10-15 and 2026-10-16 |
 | P4 | Automated quality gate. | 15 of 20 subjects accepted; each of the 5 rejections has a stated reason (field-of-view cut, missing structure) | `datasets/processed/level1/real/quality_report.json` |
 | P5 | An open-vocabulary language layer with a safety boundary. | Rules first; otherwise Claude emits a program restricted by a closed schema of operations and entity ids, validated before anything runs. Off by default; tested without network calls | ADR-L1-005, `language/` |
-| P6 | **Generated anatomy from learned shape models** (Level 2a): statistical models of the four chambers, the myocardium and both lungs, learned from 131 real CTs, draw new thoraxes. | Held-out reconstruction error: 1.1–2.1 mm for the chambers, 5.1–6.3 mm for the lungs, 3.2–4.6× better than the mean shape on 26 unseen subjects. **Validity:** 50 of 50 samples at 0.5 SD pass checks calibrated on real anatomy; at 1 SD, 78% pass against 90.5% of real held-out subjects | `LEVEL_2A_REPORT.md` §5–6, `evidence/2026-10-16_generated_thorax_seed1.jpg` |
+| P6 | **Generated anatomy from learned shape models** (Level 2a): statistical models of the four chambers, the myocardium and both lungs, learned from 131 real CTs, draw new thoraxes. | Held-out reconstruction error: 1.1–2.1 mm for the chambers, 5.1–6.3 mm for the lungs, 3.2–4.6× better than the mean shape on 26 unseen subjects. **Validity:** 50 of 50 samples at 0.5 SD pass checks calibrated on real anatomy; at 1 SD, 78% pass, against 90.5% of real held-out subjects. Shown samples are drawn at 1 SD and kept only if valid. They are as novel as a new real person: 8.8 mm against 9.1 mm to the nearest training subject | `LEVEL_2A_REPORT.md` §5–6, `evidence/2026-10-16_generated_thorax_seed1.jpg` |
 | P7 | **One structure resized by a sentence**, within its own shape model, with an honest refusal. | On a real heart, "make the left ventricle 15% smaller" is applied: −15.0% size, −38.7% volume, 0.6 mm from plain scaling, every other mesh unchanged. Growth beyond 2–6% is refused because neighbours would be penetrated, and the reply names the largest change that passes | `LEVEL_2A_REPORT.md` §7, ADR-L2-001, `evidence/2026-10-16_resize_s0029_*` |
 
 ## How the results are protected
@@ -91,8 +91,8 @@ These practices are part of the claim. They are why the numbers can be trusted.
   measurements, not clinical values, and have not been reviewed by a clinician.
 * The cardiac-cycle animation is semantic, a sequence of named phases. It is not a
   physiological simulation.
-* Level 2a generation is validated only at 0.5 SD, so its variety is limited. Resizing can
-  grow a structure by only a few percent, because neighbours do not deform. Both point to a
+* Level 2a generation keeps only samples that pass the validity checks (80% of 1 SD draws), so
+  the shown distribution is truncated. Resizing can grow a structure by only a few percent, because neighbours do not deform. Both point to a
   deformation-aware model (Stage 2b), which needs a GPU budget decision.
 * Level 2a shape models are linear: they vary shape the way the training population did.
   They cover five heart structures and the two lungs, not the vessels or the lobes. Lung

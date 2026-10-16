@@ -330,6 +330,40 @@ class TestJointModelAndSamples:
         assert far["validity"]["passes"] is False and far["validity"]["failures"]
         assert "validity" not in write_sample_scene(joint, tmp_path / "c", seed=3)
 
+    def test_a_filtered_sample_always_passes_and_repeats_with_its_seed(
+        self, tmp_path: Path
+    ) -> None:
+        """Wide draws are retried until one passes; the same seed gives the same thorax."""
+        from shapes.generate import write_valid_sample_scene
+        from shapes.joint import fit_joint
+        from shapes.validity import calibrate, face_normals, measure
+
+        shapes, faces, subjects = _sphere_population()
+        joint = fit_joint(shapes, faces, subjects)
+        mean = joint.split(joint.model.mean)
+        normals = {e: face_normals(mean[e], joint.faces[e]) for e in joint.entities}
+        limits = calibrate(
+            [measure({e: shapes[e][s] for e in shapes}, joint.faces, normals) for s in subjects]
+        )
+        tried = [
+            write_valid_sample_scene(
+                joint, tmp_path / f"s{seed}", seed=seed, limits=limits, spread=2.0, max_tries=20
+            )
+            for seed in range(6)
+        ]
+        assert all(m["validity"]["passes"] for m in tried)
+        assert any(m["generated"]["sampler"]["tries"] > 1 for m in tried), "spread too narrow"
+        again = write_valid_sample_scene(
+            joint, tmp_path / "again", seed=3, limits=limits, spread=2.0, max_tries=20
+        )
+        assert again["generated"]["coefficients"] == tried[3]["generated"]["coefficients"]
+        fallback = write_valid_sample_scene(
+            joint, tmp_path / "f", seed=0, limits=limits, spread=50.0, max_tries=2
+        )
+        assert fallback["generated"]["spread"] == 0.5
+        assert fallback["generated"]["sampler"]["kind"].startswith("fallback")
+        assert len(fallback["generated"]["sampler"]["rejected"]) == 2
+
     def test_the_viewer_swaps_geometry_and_keeps_scene_state(self, tmp_path: Path) -> None:
         """A sample changes the meshes served, not what the engine says is hidden."""
         from shapes.generate import write_sample_scene

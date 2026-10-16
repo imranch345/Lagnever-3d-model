@@ -158,9 +158,12 @@ class ViewerApp:
                     if validity["passes"]
                     else f"; fails validity: {'; '.join(validity['failures'][:3])}"
                 )
-            spread = manifest.get("generated", {}).get("spread")
+            generated = manifest.get("generated", {})
+            spread = generated.get("spread")
             if spread is not None:
-                verdict = f"drawn at {spread:g} SD, {verdict}"
+                tries = generated.get("sampler", {}).get("tries")
+                how = f" on try {tries}" if tries else ""
+                verdict = f"drawn at {spread:g} SD{how}, {verdict}"
             return {
                 "ok": True,
                 "message": f"Generated thorax, seed {seed}: {verdict}.{reset_note}",
@@ -347,20 +350,24 @@ def build_app(scene: Path, model: Path | None = None) -> ViewerApp:
 
         models_dir = model.parent.parent
         validity_path = models_dir / "validity.json"
-        limits = None
-        spread = 1.0
         if validity_path.is_file():
+            from shapes.generate import write_valid_sample_scene
             from shapes.validity import Limits
 
             validity = json.loads(validity_path.read_text(encoding="utf-8"))
             limits = Limits.from_dict(validity["limits"])
-            # The plan's rule: sample at the largest spread whose pass rate met the target.
-            spread = float(validity.get("usable_spread") or 1.0)
 
-        def sampler(seed: int, out: Path) -> dict[str, Any]:
-            return write_sample_scene(
-                joint, out, seed=seed, spread=spread, provenance=provenance, limits=limits
-            )
+            # 1 SD, kept only if valid: real-person novelty, and every shown sample passes
+            # (ADR-L2-002).
+            def sampler(seed: int, out: Path) -> dict[str, Any]:
+                return write_valid_sample_scene(
+                    joint, out, seed=seed, limits=limits, provenance=provenance
+                )
+
+        else:
+
+            def sampler(seed: int, out: Path) -> dict[str, Any]:
+                return write_sample_scene(joint, out, seed=seed, provenance=provenance)
 
         if (models_dir / "validity.json").is_file():
             from shapes.resize import Resizer as ShapeResizer
