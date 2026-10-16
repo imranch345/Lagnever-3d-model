@@ -222,3 +222,23 @@ of the frozen protocol.
   - folding;
   - overlap between entities;
   - volume against the training range.
+- **Machine restart at about 03:20.** All detached jobs stopped. Quality build was at 114 of
+  200; Step 21 point 700 at 3 of 9.
+  - Both resumed at 10:14. Finished results are kept; unfinished ones rerun from their saved
+    state.
+  - The quality build gained `--skip-built` (`f1bdcd4`). A subject counts as finished when
+    its manifest, the last file written, exists. All 114 had been built by the current code.
+- **Validity sweep written** (`shapes/validity.py`), ready for the built model.
+  - Three checks that can fail, each calibrated as "no worse than the worst real training
+    subject":
+    - folding;
+    - overlap deeper than 2 mm;
+    - volume range.
+  - Held-out real subjects run through the same checks as a control.
+  - **Correction during design.** Counting any vertex inside a neighbour as overlap flagged
+    touching structures: on the reference, 58% of the left ventricle counted as "inside" the
+    myocardium it lies against. Requiring 2 mm depth brings that to 0.
+  - **Remaining overlap on the real reference.** 10.2% of the right atrium lies more than 2 mm
+    inside the coarse right-lung template, and 7.4% of the myocardium inside the left lung.
+    Calibration accounts for this level, which exists in real data.
+  - About 12 s per thorax.

@@ -345,3 +345,64 @@ class TestJointModelAndSamples:
         app = ViewerApp(tmp_path / "real")
         reply = app.sample()
         assert not reply["ok"] and "--model" in reply["message"]
+
+
+class TestValidity:
+    """Checks that can fail: folding, overlap and volume, calibrated on training subjects."""
+
+    def _setup(self) -> tuple:
+        from shapes.joint import fit_joint
+        from shapes.validity import calibrate, face_normals, measure
+
+        shapes, faces, subjects = _sphere_population()
+        joint = fit_joint(shapes, faces, subjects)
+        mean = joint.split(joint.model.mean)
+        normals = {e: face_normals(mean[e], joint.faces[e]) for e in joint.entities}
+        train = [measure({e: shapes[e][s] for e in shapes}, joint.faces, normals) for s in subjects]
+        return joint, mean, normals, calibrate(train)
+
+    def test_the_mean_passes_and_each_defect_is_caught(self) -> None:
+        """A dent folded inward, a neighbour run into, a shrunken lung: each fails its check."""
+        from awr.ontology import load_ontology
+        from shapes.validity import judge, measure
+
+        ontology = load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+        joint, mean, normals, limits = self._setup()
+
+        def kinds(shapes: dict) -> set[str]:
+            return {k for k, _ in judge(measure(shapes, joint.faces, normals), limits, ontology)}
+
+        assert kinds(mean) == set()
+        lv = mean["heart.left_ventricle"]
+        centre = lv.mean(axis=0)
+        # A cap pushed through a plane into the inside: a local fold, as a sample can make.
+        cut = centre[0] + 0.4 * np.ptp(lv[:, 0]) / 2
+        dented = lv.copy()
+        dented[lv[:, 0] > cut, 0] = 2 * cut - lv[lv[:, 0] > cut, 0]
+        assert "folding" in kinds({**mean, "heart.left_ventricle": dented})
+        rv = mean["heart.right_ventricle"]
+        inside = centre + 0.5 * (rv - rv.mean(axis=0))
+        assert "overlap" in kinds({**mean, "heart.right_ventricle": inside})
+        lung = mean["respiratory.left_lung"]
+        shrunk = lung.mean(axis=0) + 0.6 * (lung - lung.mean(axis=0))
+        assert kinds({**mean, "respiratory.left_lung": shrunk}) == {"volume"}
+
+    def test_the_sweep_reports_rates_and_a_control(self) -> None:
+        """Wider spreads fail no less often; held-out real shapes are the control."""
+        from shapes.validity import KINDS, sweep
+
+        shapes, faces, subjects = _sphere_population(10)
+        from shapes.joint import fit_joint
+
+        joint = fit_joint(shapes, faces, subjects[:8])
+        train = {s: {e: shapes[e][s] for e in shapes} for s in subjects[:8]}
+        held = {s: {e: shapes[e][s] for e in shapes} for s in subjects[8:]}
+        result = sweep(joint, train, held, spreads=(0.5, 3.0), samples=12)
+        assert result["control"]["subjects"] == 2
+        narrow, wide = result["spreads"]
+        assert set(narrow["failing"]) == set(KINDS)
+        assert wide["pass_rate"] <= narrow["pass_rate"]
+        assert wide["failing"]["volume"] > 0
+        assert narrow["failing"]["overlap"] == 0 and narrow["failing"]["folding"] == 0
+        assert result["usable_spread"] in (None, 0.5, 3.0)
+        assert result["method"]["calibrated_on"] == 8
