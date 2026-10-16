@@ -56,6 +56,7 @@ __all__ = [
     "calibrate",
     "judge",
     "measure",
+    "overlap_share",
     "sweep",
 ]
 
@@ -77,6 +78,19 @@ def face_normals(vertices: FloatArray, faces: npt.ArrayLike) -> FloatArray:
     return np.asarray(normals / np.maximum(lengths, 1e-12), dtype=np.float64)
 
 
+def overlap_share(inner: trimesh.Trimesh, outer: trimesh.Trimesh) -> float:
+    """Share of ``inner``'s vertices lying more than ``DEPTH_MM`` inside ``outer``."""
+    low_a, high_a = inner.bounds
+    low_b, high_b = outer.bounds
+    if np.any(high_a < low_b) or np.any(high_b < low_a):
+        return 0.0
+    inside = np.asarray(outer.contains(inner.vertices), dtype=bool)
+    if not inside.any():
+        return 0.0
+    _, depth, _ = trimesh.proximity.closest_point(outer, inner.vertices[inside])
+    return int(np.sum(np.asarray(depth) > DEPTH_MM)) / len(inner.vertices)
+
+
 def measure(
     shapes: Mapping[str, FloatArray],
     faces: Mapping[str, npt.ArrayLike],
@@ -88,22 +102,12 @@ def measure(
         e: float(np.mean(np.sum(face_normals(v, faces[e]) * mean_normals[e], axis=1) < 0))
         for e, v in shapes.items()
     }
-    overlap: dict[str, float] = {}
-    for a, mesh_a in meshes.items():
-        low_a, high_a = mesh_a.bounds
-        for b, mesh_b in meshes.items():
-            if a == b:
-                continue
-            low_b, high_b = mesh_b.bounds
-            if np.any(high_a < low_b) or np.any(high_b < low_a):
-                overlap[f"{a}|{b}"] = 0.0
-            else:
-                inside = np.asarray(mesh_b.contains(mesh_a.vertices), dtype=bool)
-                deep = 0
-                if inside.any():
-                    _, depth, _ = trimesh.proximity.closest_point(mesh_b, mesh_a.vertices[inside])
-                    deep = int(np.sum(np.asarray(depth) > DEPTH_MM))
-                overlap[f"{a}|{b}"] = deep / len(mesh_a.vertices)
+    overlap = {
+        f"{a}|{b}": overlap_share(mesh_a, mesh_b)
+        for a, mesh_a in meshes.items()
+        for b, mesh_b in meshes.items()
+        if a != b
+    }
     return {
         "folding": folding,
         "overlap": overlap,
@@ -121,6 +125,15 @@ class Limits:
     folding: dict[str, float]
     overlap: dict[str, float]
     volume_ml: dict[str, tuple[float, float]]
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> Limits:
+        """Inverse of ``dataclasses.asdict``, as stored in ``validity.json``."""
+        return cls(
+            folding={str(k): float(x) for k, x in payload["folding"].items()},
+            overlap={str(k): float(x) for k, x in payload["overlap"].items()},
+            volume_ml={str(k): (float(a), float(b)) for k, (a, b) in payload["volume_ml"].items()},
+        )
 
 
 def calibrate(measures: Sequence[Mapping[str, Any]], margin: float = MARGIN) -> Limits:

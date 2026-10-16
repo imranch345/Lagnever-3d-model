@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import trimesh
 
 from assets.meshes import VIEWER_FRAME, MeshQuality, side_report
@@ -28,7 +29,7 @@ from assets.quality import assess
 from awr.ontology import AnatomyOntology, load_ontology
 from shapes.joint import JointModel
 
-__all__ = ["draw_coefficients", "write_sample_scene"]
+__all__ = ["draw_coefficients", "entity_entry", "model_mesh", "write_sample_scene"]
 
 MEDICAL_STATUS = (
     "generated anatomy from a statistical shape model; not a measurement of anyone; "
@@ -42,6 +43,33 @@ def draw_coefficients(
     """Weights in standard deviations, reproducible from the seed."""
     rng = np.random.default_rng(seed)
     return [float(x) for x in np.clip(rng.standard_normal(n_modes) * spread, -clip, clip)]
+
+
+def model_mesh(vertices: npt.ArrayLike, faces: npt.ArrayLike) -> trimesh.Trimesh:
+    """A mesh from model vertices and the template's faces, normals made consistent."""
+    mesh = trimesh.Trimesh(np.asarray(vertices), np.asarray(faces), process=False)
+    trimesh.repair.fix_normals(mesh)
+    return mesh
+
+
+def entity_entry(entity_id: str, mesh: trimesh.Trimesh) -> dict[str, Any]:
+    """A manifest entry for a model-made mesh, measured like a built subject's."""
+    watertight = bool(mesh.is_watertight)
+    centroid = [float(v) for v in mesh.centroid]
+    pieces = len(mesh.split(only_watertight=False))
+    quality = MeshQuality(
+        faces=len(mesh.faces),
+        vertices=len(mesh.vertices),
+        watertight=watertight,
+        components=pieces,
+        # No voxel mask exists for a model surface; a deformed template is one closed
+        # surface, so its connectedness is its count of surface pieces.
+        voxel_components=pieces,
+        volume_ml=float(abs(mesh.volume)) / 1000.0 if watertight else None,
+        centroid_mm=centroid,
+        bounds_mm=[[float(v) for v in r] for r in mesh.bounds],
+    )
+    return {"node": entity_id, "centroid_viewer_mm": centroid, "quality": asdict(quality)}
 
 
 def write_sample_scene(
@@ -62,29 +90,9 @@ def write_sample_scene(
     entities: dict[str, Any] = {}
     centroids: dict[str, list[float]] = {}
     for entity_id, points in vertices.items():
-        mesh = trimesh.Trimesh(points, joint.faces[entity_id], process=False)
-        trimesh.repair.fix_normals(mesh)
-        watertight = bool(mesh.is_watertight)
-        centroid = [float(v) for v in mesh.centroid]
-        centroids[entity_id] = centroid
-        pieces = len(mesh.split(only_watertight=False))
-        quality = MeshQuality(
-            faces=len(mesh.faces),
-            vertices=len(mesh.vertices),
-            watertight=watertight,
-            components=pieces,
-            # No voxel mask exists for a sampled surface; a deformed template is one closed
-            # surface, so its connectedness is its count of surface pieces.
-            voxel_components=pieces,
-            volume_ml=float(abs(mesh.volume)) / 1000.0 if watertight else None,
-            centroid_mm=centroid,
-            bounds_mm=[[float(v) for v in r] for r in mesh.bounds],
-        )
-        entities[entity_id] = {
-            "node": entity_id,
-            "centroid_viewer_mm": centroid,
-            "quality": asdict(quality),
-        }
+        mesh = model_mesh(points, joint.faces[entity_id])
+        entities[entity_id] = entity_entry(entity_id, mesh)
+        centroids[entity_id] = entities[entity_id]["centroid_viewer_mm"]
         scene.add_geometry(mesh, node_name=entity_id, geom_name=entity_id)
 
     out_dir.mkdir(parents=True, exist_ok=True)

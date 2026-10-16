@@ -406,3 +406,85 @@ class TestValidity:
         assert narrow["failing"]["overlap"] == 0 and narrow["failing"]["folding"] == 0
         assert result["usable_spread"] in (None, 0.5, 3.0)
         assert result["method"]["calibrated_on"] == 8
+
+
+class TestResize:
+    """One entity resized within its model; nothing else moves; implausible results refused."""
+
+    def _resizable(self, tmp_path: Path) -> tuple:
+        from shapes.generate import write_sample_scene
+        from shapes.joint import fit_joint
+        from shapes.resize import Resizer
+        from shapes.validity import sweep
+
+        shapes, faces, subjects = _sphere_population(10)
+        joint = fit_joint(shapes, faces, subjects)
+        models = tmp_path / "level2a"
+        joint.save(models / "models" / "joint.npz")
+        for e in shapes:
+            stacked = np.stack([shapes[e][s] for s in subjects])
+            fit(e, stacked, faces[e], tuple(subjects)).save(models / "models" / f"{e}.npz")
+        train = {s: {e: shapes[e][s] for e in shapes} for s in subjects}
+        validity = sweep(joint, train, {}, spreads=(1.0,), samples=2)
+        (models / "validity.json").write_text(json.dumps(validity))
+        scene = tmp_path / "mean"
+        manifest = write_sample_scene(joint, scene, seed=0, spread=0.0)
+        return Resizer(models), scene, manifest
+
+    def test_one_entity_grows_and_nothing_else_moves(self, tmp_path: Path) -> None:
+        """+5% is reached; other meshes are identical; a second resize builds on the first."""
+        from shapes.register import load_scene
+
+        resizer, scene, manifest = self._resizable(tmp_path)
+        lv = "heart.left_ventricle"
+        outcome = resizer.resize(scene, manifest, lv, 1.05, tmp_path / "r1")
+        assert outcome.ok, outcome.message
+        assert abs(outcome.achieved - 1.05) < 0.01
+        assert outcome.from_plain_scaling_mm < 0.5
+        before, after = load_scene(scene), load_scene(tmp_path / "r1")
+        for entity in before:
+            same = np.allclose(before[entity].vertices, after[entity].vertices)
+            assert same == (entity != lv), entity
+        assert outcome.manifest["resized"][0]["entity"] == lv
+        assert outcome.manifest["checks"]["usable"], outcome.manifest["checks"]
+        again = resizer.resize(tmp_path / "r1", outcome.manifest, lv, 0.95, tmp_path / "r2")
+        assert again.ok, again.message
+        grown = resizer.base_shapes(tmp_path / "r1", outcome.manifest)[lv]
+        assert np.allclose(grown, after[lv].vertices)
+        assert len(again.manifest["resized"]) == 2
+
+    def test_beyond_the_training_range_is_refused(self, tmp_path: Path) -> None:
+        """+30% from the mean exceeds every training volume: refused, nothing written."""
+        resizer, scene, manifest = self._resizable(tmp_path)
+        outcome = resizer.resize(scene, manifest, "heart.left_ventricle", 1.30, tmp_path / "r")
+        assert not outcome.ok and outcome.manifest is None
+        assert any("volume" in f for f in outcome.failures)
+        assert not (tmp_path / "r").exists()
+
+    def test_running_into_a_neighbour_is_refused(self, tmp_path: Path) -> None:
+        """The current neighbours are what is checked: an RV moved against the LV blocks it."""
+        from shapes.register import load_scene
+
+        resizer, scene, manifest = self._resizable(tmp_path)
+        meshes = load_scene(scene)
+        meshes["heart.right_ventricle"].apply_translation([20.0, 0.0, -10.0])
+        crowded = trimesh.Scene()
+        for name, mesh in meshes.items():
+            crowded.add_geometry(mesh, node_name=name, geom_name=name)
+        (scene / "scene.glb").write_bytes(crowded.export(file_type="glb"))
+        outcome = resizer.resize(scene, manifest, "heart.left_ventricle", 1.05, tmp_path / "r")
+        assert not outcome.ok
+        assert any("inside" in f for f in outcome.failures), outcome.failures
+
+    def test_what_cannot_be_resized_says_why(self, tmp_path: Path) -> None:
+        """No model for the entity, or no correspondence for the scene: refused with a reason."""
+        resizer, scene, manifest = self._resizable(tmp_path)
+        no_model = resizer.resize(scene, manifest, "respiratory.trachea", 1.1, tmp_path / "a")
+        assert not no_model.ok and "no shape model" in no_model.message
+        too_far = resizer.resize(scene, manifest, "heart.left_ventricle", 1.5, tmp_path / "b")
+        assert not too_far.ok and "at most 30%" in too_far.message
+        real = {k: v for k, v in manifest.items() if k != "generated"} | {"subject": "s9999"}
+        unregistered = resizer.resize(
+            tmp_path / "nowhere", real, "heart.left_ventricle", 1.1, tmp_path / "c"
+        )
+        assert not unregistered.ok and "Generate a thorax first" in unregistered.message
