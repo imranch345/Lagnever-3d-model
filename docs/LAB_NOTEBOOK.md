@@ -327,3 +327,53 @@ training).
 
 **Evidence:** `experiments/runs/step21/point_0{400,600,700}/` and `sweep.log` (PR #5 branch);
 the summary was computed with `experiments.step21.basin_entry.summarise`.
+
+## 2026-10-16 (12:59) — Level 2a shape models built on 131 real thoraxes
+
+**Data.** 131 usable subjects, split once with seed 0: **105 training, 26 held out.**
+Registrations are cached (917 = 131 × 7).
+
+**Registration (template → subject), surface fit `mean_from_target`:**
+
+| entity | median | 90th pct | max | excluded (> 2 mm) |
+| --- | --- | --- | --- | --- |
+| left ventricle | 0.24 mm | 0.28 | 0.61 | 0 |
+| left atrium | 0.25 | 0.30 | 1.51 | 0 |
+| right atrium | 0.30 | 0.36 | 1.76 | 0 |
+| myocardium | 0.31 | 0.40 | 1.30 | 0 |
+| right ventricle | 0.40 | 0.57 | 1.57 | 0 |
+| left lung | 1.13 | 1.70 | 3.54 | 8 |
+| right lung | 1.07 | 1.69 | 3.48 | 8 |
+
+Four subjects fail both lungs (s0436, s0494, s0553, s0629). Every exclusion is listed with its
+error in `report.json`; none was dropped silently.
+
+**Models (95% variance kept). Held-out generality against the mean-shape baseline:**
+
+| entity | train | modes | 1st mode | held-out error | mean baseline | ratio | specificity |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| left ventricle | 105 | 9 | 42% | **1.13 mm** | 4.28 mm | 3.8× | 2.77 mm |
+| myocardium | 105 | 9 | 43% | **1.15** | 4.43 | 3.8× | 2.70 |
+| right ventricle | 105 | 11 | 49% | **1.49** | 6.24 | 4.2× | 3.44 |
+| left atrium | 105 | 5 | 76% | **1.92** | 8.79 | 4.6× | 3.48 |
+| right atrium | 105 | 6 | 68% | **2.08** | 9.58 | 4.6× | 4.26 |
+| left lung | 100 | 10 | 34% | **5.12** | 20.76 | 4.1× | 12.04 |
+| right lung | 101 | 7 | 57% | **6.34** | 26.15 | 4.1× | 11.77 |
+| **joint, all 7** | 98 | 17 | 45% | **4.31** | 13.71 | 3.2× | 8.61 |
+
+Generality is the mean vertex error reconstructing an unseen subject. Specificity is the mean
+distance from 50 random samples to the nearest training shape.
+
+**Reading.**
+- Every model beats predicting the mean by 3.2–4.6× on subjects it never saw.
+- The chambers reconstruct unseen hearts to about 1–2 mm.
+- Lungs are harder: errors are 5–6 mm on organs about 250 mm tall, so roughly 2% of size.
+  The worst held-out right lungs are s0587 (13.6 mm) and s0645 (13.0 mm).
+- Specificity is about twice generality for the lungs. With 100 shapes in a 7–10-dimensional
+  space, samples sit farther from any one training lung than an unseen real lung does. Whether
+  that means implausible is what the validity sweep measures next.
+
+**Not yet shown.** Validity (the sweep is running), resize on real anatomy, and screenshots.
+
+**Evidence:** `datasets/processed/level2a/report.json`, `build.log` and `models/` (local
+data); code at `8fc2d04` + `f1bdcd4`.
