@@ -177,10 +177,17 @@ class Resizer:
             "from_plain_scaling_mm": float(np.linalg.norm(resized - plain, axis=1).mean()),
         }
 
-        baseline = self._measure(entity, current, shapes)
-        failures = self._check(entity, resized, shapes, baseline)
+        # Neighbours do not change during one resize: their meshes, and the spatial indexes
+        # trimesh builds on first query, are made once and reused by every check.
+        neighbours = {
+            other: model_mesh(shapes[other], self.joint.faces[other])
+            for other in self.entities
+            if other != entity
+        }
+        baseline = self._measure(entity, current, neighbours)
+        failures = self._check(entity, resized, neighbours, baseline)
         if failures:
-            feasible = self._largest(entity, model, current, shapes, baseline, factor)
+            feasible = self._largest(entity, model, current, neighbours, baseline, factor)
             sign = "+" if factor > 1 else "-"
             offer = (
                 f" The largest {('increase' if factor > 1 else 'decrease')} that passes for this "
@@ -210,7 +217,7 @@ class Resizer:
         )
 
     def _measure(
-        self, entity: str, shape: FloatArray, shapes: Mapping[str, FloatArray]
+        self, entity: str, shape: FloatArray, neighbours: Mapping[str, trimesh.Trimesh]
     ) -> dict[str, float]:
         """Folding, volume and overlap with every other entity, on correspondence meshes."""
         faces = self.joint.faces[entity]
@@ -222,10 +229,7 @@ class Resizer:
             "volume": _volume(shape, faces) / 1000.0,
         }
         mesh = model_mesh(shape, faces)
-        for other in self.entities:
-            if other == entity:
-                continue
-            other_mesh = model_mesh(shapes[other], self.joint.faces[other])
+        for other, other_mesh in neighbours.items():
             measures[f"{entity}|{other}"] = overlap_share(mesh, other_mesh)
             measures[f"{other}|{entity}"] = overlap_share(other_mesh, mesh)
         return measures
@@ -234,11 +238,11 @@ class Resizer:
         self,
         entity: str,
         shape: FloatArray,
-        shapes: Mapping[str, FloatArray],
+        neighbours: Mapping[str, trimesh.Trimesh],
         baseline: Mapping[str, float],
     ) -> list[str]:
         """Failures of ``shape``: worse than real anatomy and worse than the subject was."""
-        found = self._measure(entity, shape, shapes)
+        found = self._measure(entity, shape, neighbours)
         failures: list[str] = []
         if found["folding"] > max(self.limits.folding[entity], baseline["folding"]):
             failures.append(f"{found['folding']:.1%} of its faces fold")
@@ -258,7 +262,7 @@ class Resizer:
         entity: str,
         model: ShapeModel,
         current: FloatArray,
-        shapes: Mapping[str, FloatArray],
+        neighbours: Mapping[str, trimesh.Trimesh],
         baseline: Mapping[str, float],
         factor: float,
     ) -> int | None:
@@ -268,7 +272,7 @@ class Resizer:
         while high - low > 1:
             middle = (low + high) // 2
             shape = resize_shape(model, current, 1 + sign * middle / 100)
-            if self._check(entity, shape, shapes, baseline):
+            if self._check(entity, shape, neighbours, baseline):
                 high = middle
             else:
                 low = middle
