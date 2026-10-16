@@ -35,7 +35,7 @@ from language.layer import LanguageLayer, Translator, translator_from_environmen
 from reasoning.command_engine import CommandEngine
 from viewer.state import scene_state
 
-__all__ = ["Resizer", "ViewerApp", "make_server", "main"]
+__all__ = ["Resizer", "ViewerApp", "build_app", "make_server", "main"]
 
 STATIC = Path(__file__).parent / "static"
 MAX_COMMAND_BYTES = 4096
@@ -309,26 +309,16 @@ def make_server(app: ViewerApp, port: int = 8765) -> ThreadingHTTPServer:
     return ThreadingHTTPServer(("127.0.0.1", port), _handler(app))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Serve one built scene."""
-    parser = argparse.ArgumentParser(description="Lagnav Level 1 viewer.")
-    parser.add_argument("--scene", type=Path, required=True, help="folder with scene.glb")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument(
-        "--model",
-        type=Path,
-        default=None,
-        help="joint shape model (shapes.build) to draw generated thoraxes from",
-    )
-    args = parser.parse_args(argv)
+def build_app(scene: Path, model: Path | None = None) -> ViewerApp:
+    """The viewer for a built scene, with sampling and resizing when a model is given."""
     sampler = None
     resizer: Resizer | None = None
-    if args.model is not None:
+    if model is not None:
         from shapes.generate import write_sample_scene
         from shapes.joint import JointModel
 
-        joint = JointModel.load(args.model)
-        provenance_path = args.model.parent.parent / "provenance.json"
+        joint = JointModel.load(model)
+        provenance_path = model.parent.parent / "provenance.json"
         provenance = (
             json.loads(provenance_path.read_text(encoding="utf-8"))
             if provenance_path.is_file()
@@ -338,7 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         def sampler(seed: int, out: Path) -> dict[str, Any]:
             return write_sample_scene(joint, out, seed=seed, provenance=provenance)
 
-        models_dir = args.model.parent.parent
+        models_dir = model.parent.parent
         if (models_dir / "validity.json").is_file():
             from shapes.resize import Resizer as ShapeResizer
 
@@ -355,8 +345,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Generated and resized scenes go beside the model, never among the real subjects, where
     # the quality report would count them as scans.
-    samples_dir = args.model.parent.parent / "viewer_scenes" if args.model is not None else None
-    app = ViewerApp(args.scene, sampler=sampler, resizer=resizer, samples_dir=samples_dir)
+    samples_dir = model.parent.parent / "viewer_scenes" if model is not None else None
+    return ViewerApp(scene, sampler=sampler, resizer=resizer, samples_dir=samples_dir)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Serve one built scene."""
+    parser = argparse.ArgumentParser(description="Lagnav Level 1 viewer.")
+    parser.add_argument("--scene", type=Path, required=True, help="folder with scene.glb")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=None,
+        help="joint shape model (shapes.build) to draw generated thoraxes from",
+    )
+    args = parser.parse_args(argv)
+    app = build_app(args.scene, args.model)
     server = make_server(app, args.port)
     print(f"Lagnav viewer on http://127.0.0.1:{server.server_address[1]}/", flush=True)
     try:

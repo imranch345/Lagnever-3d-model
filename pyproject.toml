@@ -47,6 +47,8 @@ packages = [
   "assets",
   "language",
   "shapes",
+  "viewer",
+  "dashboard",
   "reasoning",
   "geometry",
   "generation",
@@ -67,6 +69,8 @@ packages = [
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml"]
+viewer = ["static/*"]
+dashboard = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

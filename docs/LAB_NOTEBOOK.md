@@ -393,3 +393,30 @@ data); code at `8fc2d04` + `f1bdcd4`.
   covered by a test.
 - **Second fix.** The viewer wrote generated scenes to `real/samples/`, where the next quality
   run would have counted them as scans. They now go to `level2a/viewer_scenes/`.
+
+## 2026-10-16 (13:40) — A dashboard over the whole project
+
+- **Asked for by the user:** "a frontend dashboard where everything is connected".
+  `python -m dashboard.server` serves it on 127.0.0.1:8795, local only.
+- **Six tabs, read live every 15 s from files on this machine:**
+  - Overview: jobs and headline results;
+  - Research: Step 21's branch map, escape timing and table;
+  - Generated anatomy: funnel, held-out errors, validity, samples;
+  - 3D viewer: the viewer itself, embedded;
+  - Evidence;
+  - Notebook & docs.
+- **Nothing is computed twice.** Step 21 is read from each run's JSON, the models from
+  `report.json`, and the headline results from `RESULTS.md`. The research code is not
+  imported.
+- **Problems found while building it:**
+  - A job that writes its log only at the end looked "stopped". Job state now also checks
+    for the process.
+  - Escapes at the same step overlapped in the strip plot. It is now a proper dot plot.
+  - On a phone, charts first overflowed the page, then shrank to unreadable text. They now
+    scroll inside their card at a legible size.
+- **Charts:** the reference palette's first two slots, validated with the dataviz checker
+  (all checks pass, light and dark). Each chart has a legend for two series, tooltips, and a
+  table view.
+- **Tests:** 7 in `tests/test_dashboard.py`. They cover job states, verdicts, whitelists, path
+  traversal and every route.
+- **Evidence:** `docs/evidence/2026-10-16_dashboard_step21_live.jpg`.
