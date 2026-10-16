@@ -5,7 +5,7 @@ investor material. Every number points to where it comes from. The dated, comple
 including runs that failed, is [`LAB_NOTEBOOK.md`](LAB_NOTEBOOK.md). This page is updated
 whenever a headline result changes.
 
-*Last updated: 2026-10-16, 16:40.*
+*Last updated: 2026-10-16, 18:40.*
 
 ## What the project is
 
@@ -37,11 +37,13 @@ Nothing here is medically validated or intended for clinical use.
 | R4 | The gap to an identity-and-graph lookup (11.57°) is **not** explained by relation types, per-relation messages, depth, global context or the objective. | shuffling relation types changes rotation by 0.0003°; the objective rewards relations (−82.2%) but the model captures 15.2% of it | Steps 11–14 |
 | R5 | Whether training uses the graph is bimodal across seeds, with no measurable precursor. | 6 of 10 seeds use it, 3 do not, 1 is intermediate; no warning signal at 5-step resolution or in gradient direction | Steps 15–19 |
 | R6 | **By step 805 the outcome is fixed**: changing the data order does not stop a seed that is about to escape. | 8 of 8 branches escape, at steps 830–840, final rotation 20.988° ± 0.023 | Step 20 |
-| R7 | Seed 9's escape survives every data ordering tried **from step 400 on**, though ordering shifts its timing (from 400 it escapes 30–85 steps earlier). | 8/8 at each of 400, 600 and 700; 24 branches end at 20.96–21.07°; every reference reproduces exactly; 182/182 frozen checksums clean. Steps 200 and 0, which decide whether it is fixed at initialisation, are running | Step 21 plan; `LAB_NOTEBOOK.md` 2026-10-16 |
+| R7 | **The outcome is fixed from initialisation.** Seed 9's escape survives every data ordering tried, from every branch point, including step 0. Ordering shifts only *when* it happens. | 48 of 48 branches escape (8 each at steps 0, 200, 400, 600 and 700) plus Step 20's 8 at 805. Escapes fall at steps 700–865 against seed 9's own 830–835, and all end at 20.93–21.07°. Every reference reproduces exactly; 182/182 frozen checksums clean. Prediction 4 (step 0 would split) was wrong | `STEP_21_BASIN_ENTRY_REPORT.md` |
 
-R5–R7 make a result about training dynamics: in this setting, using relational structure is a
-discrete event decided by the optimisation state, and is not visible beforehand in standard
-signals.
+R5–R7 make a result about training dynamics. In this setting, whether a model uses relational
+structure is a discrete outcome. For seed 9 it is already settled by the initial weights:
+data order changes when it happens, never whether it happens. It is also not visible
+beforehand in standard training signals. Step 22 asks whether the same holds for a seed that
+does not escape.
 
 ### Product (real CT)
 

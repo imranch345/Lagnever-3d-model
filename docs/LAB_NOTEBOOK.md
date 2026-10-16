@@ -516,3 +516,31 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Also.** Resize now builds neighbour meshes once per request (`c6ac22e`). A profile puts
   98% of check time in trimesh's pure-Python ray test. A faster inside test would change the
   overlap measure and need recalibration, so it is deferred.
+
+## 2026-10-16 (18:22) — Step 21 complete: decision A, fixed from initialisation
+
+- **Stage 2a** (branch points 200 and 0) finished at 18:22. Every point is unanimous:
+  **0, 200, 400, 600 and 700 each 8/8**, and Step 20's 805 is 8/8 too. That is 48 of 48
+  branches in this step.
+- **Integrity, all clean:**
+  - every reference reproduces frozen seed 9 exactly: 0 at 43/43, 200 at 39/39, 400 at
+    35/35, 600 at 31/31, 700 at 29/29;
+  - one starting state per point, and 8 distinct orderings at every point;
+  - the replay is identical;
+  - **182/182** frozen checksums at the end;
+  - `test_splits_read: []`.
+- **Decision under the preregistered rule: A, fixed from initialisation.** H15 is supported.
+  H16 is not supported for seed 9.
+- **Predictions:**
+  - 1–3 confirmed;
+  - **4 was wrong**: step 0 was expected to split, and it is unanimous;
+  - 5 holds broadly, not cleanly: escape timing spreads from a 30-step range at 600 to 160
+    at 200.
+- **Seen, not claimed.** Ordering moves *when* the escape happens, between steps 700 and
+  865 across all branches, against seed 9's own 830–835. It never moves *whether* it
+  happens, nor where training ends (20.93–21.07°).
+- **Next, by §12:** Step 22 branches seed 5, a non-escaper, at step 0. It is preregistered
+  first; nothing has started.
+- **Evidence:** `docs/STEP_21_BASIN_ENTRY_REPORT.md` and
+  `experiments/runs/step21/summary.json`. The README research table and RESULTS R7 are
+  updated.
