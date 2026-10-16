@@ -38,6 +38,7 @@ import trimesh
 from assets.meshes import side_report
 from assets.quality import assess
 from awr.ontology import AnatomyOntology, load_ontology
+from language.program import MAX_RESIZE_PERCENT
 from shapes.generate import entity_entry, model_mesh
 from shapes.joint import JointModel
 from shapes.register import load_scene
@@ -48,7 +49,7 @@ __all__ = ["MAX_PERCENT", "ResizeOutcome", "Resizer", "resize_shape"]
 
 FloatArray = npt.NDArray[np.float64]
 
-MAX_PERCENT = 30.0
+MAX_PERCENT = MAX_RESIZE_PERCENT
 CORRESPONDENCE = "correspondence.npz"
 
 

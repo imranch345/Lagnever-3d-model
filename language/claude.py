@@ -43,6 +43,9 @@ describe, invent or draw anatomy; you only choose steps.
 Operations:
 - show, hide, isolate: change which structures are visible. isolate shows only its targets.
 - set_opacity: value is a number from 0 (invisible) to 1 (opaque); "transparent" is about 0.3.
+- resize: exactly one target; value is the change in linear size in percent, from -30 to +30 \
+("20% larger" is +20, "shrink by 10%" is -10). It reshapes that one structure as real anatomy \
+varies, and is refused if the result would be implausible.
 - set_lod: value is a level of detail from 0 (whole organs) to 4 (most detailed).
 - set_level: value is one of {levels}; it sets the audience level.
 - animate_flow and stop_animation: start or stop the blood-flow animation.

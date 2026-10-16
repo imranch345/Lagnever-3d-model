@@ -105,6 +105,7 @@ def scene_state(engine: CommandEngine, manifest: Mapping[str, Any]) -> dict[str,
                 "colour": colour_for(entity_id, state.material.base_color),
                 "has_geometry": entity_id in with_mesh,
                 "lod": int(entity.lod),
+                "size": round(float(state.transform.scale[0]), 4),
             }
         )
     source = manifest.get("source", {})

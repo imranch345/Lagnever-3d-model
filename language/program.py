@@ -24,6 +24,7 @@ from awr.ontology import AnatomyOntology
 
 __all__ = [
     "LEVELS",
+    "MAX_RESIZE_PERCENT",
     "OPERATIONS",
     "Program",
     "ProgramError",
@@ -39,6 +40,7 @@ OPERATIONS: tuple[str, ...] = (
     "hide",
     "isolate",
     "set_opacity",
+    "resize",
     "set_lod",
     "set_level",
     "animate_flow",
@@ -46,7 +48,9 @@ OPERATIONS: tuple[str, ...] = (
     "explain",
     "reset",
 )
-NEEDS_TARGETS = frozenset({"show", "hide", "isolate", "set_opacity"})
+NEEDS_TARGETS = frozenset({"show", "hide", "isolate", "set_opacity", "resize"})
+#: Largest change of linear size one resize may ask for, in percent (ADR-L2-001).
+MAX_RESIZE_PERCENT = 30.0
 LEVELS: tuple[str, ...] = ("primary", "school", "high_school", "university", "medical")
 MAX_STEPS = 12
 
@@ -168,6 +172,16 @@ def validate_program(raw: Mapping[str, Any], ontology: AnatomyOntology) -> Progr
             if lod != int(lod) or not 0 <= lod <= max_lod:
                 raise ProgramError(f"Step {index + 1}: level of detail must be 0-{max_lod}.")
             value = str(int(lod))
+        elif op == "resize":
+            if len(targets) != 1:
+                raise ProgramError(f"Step {index + 1}: resize changes one structure at a time.")
+            percent = _number(value, op)
+            if percent == 0 or abs(percent) > MAX_RESIZE_PERCENT:
+                raise ProgramError(
+                    f"Step {index + 1}: resize takes a change from -{MAX_RESIZE_PERCENT:g}% "
+                    f"to +{MAX_RESIZE_PERCENT:g}%, not {percent:g}%."
+                )
+            value = f"{percent:+g}"
         elif op == "set_level" and value not in LEVELS:
             raise ProgramError(f"Step {index + 1}: level must be one of {list(LEVELS)}.")
         steps.append(Step(op=op, targets=targets, value=value))
@@ -179,6 +193,9 @@ def to_commands(program: Program) -> list[str]:
 
     Entity ids are used verbatim: the resolver accepts them as exact surface forms, so there
     is no second, lossy name lookup between the program and the engine.
+
+    ``resize`` has no engine command: the language layer applies it through the shape model
+    and records it in the AWR itself (ADR-L2-001).
     """
     commands: list[str] = []
     for step in program.steps:

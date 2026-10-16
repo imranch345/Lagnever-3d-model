@@ -10,6 +10,10 @@ Routes:
 ``POST /sample``         ``{"seed": n}`` -> draw a thorax from the shape model (``--model``)
 ``POST /original``       back to the real subject's geometry
 
+A request such as "make the left ventricle 20% larger" reshapes one structure through the shape
+model (``--model`` with a ``validity.json`` beside it; ADR-L2-001). The reply then has
+``geometry_changed`` set, so the page reloads the meshes.
+
     python -m viewer.server --scene datasets/processed/level1/s0011 --port 8765
 """
 
@@ -25,14 +29,21 @@ from pathlib import Path
 from typing import Any
 
 from awr.config import load_domain_config
+from awr.schema import Transform
+from editing.operations import SetTransform
 from language.layer import LanguageLayer, Translator, translator_from_environment
 from reasoning.command_engine import CommandEngine
 from viewer.state import scene_state
 
-__all__ = ["ViewerApp", "make_server", "main"]
+__all__ = ["Resizer", "ViewerApp", "make_server", "main"]
 
 STATIC = Path(__file__).parent / "static"
 MAX_COMMAND_BYTES = 4096
+
+#: (scene folder, its manifest, entity, factor, output folder) -> (applied, message, manifest).
+Resizer = Callable[
+    [Path, dict[str, Any], str, float, Path], tuple[bool, str, dict[str, Any] | None]
+]
 
 
 class ViewerApp:
@@ -46,18 +57,24 @@ class ViewerApp:
         translator: Translator | None = None,
         sampler: Callable[[int, Path], dict[str, Any]] | None = None,
         samples_dir: Path | None = None,
+        resizer: Resizer | None = None,
     ) -> None:
         self.scene_dir = scene_dir
         self.original_dir = scene_dir
         # Draws a thorax from a shape model into a folder and returns its manifest. Injected,
         # so the server needs the shape tooling only when a model is actually loaded.
         self.sampler = sampler
+        # Reshapes one entity through its shape model into a new folder (ADR-L2-001).
+        self.resizer = resizer
         self.samples_dir = samples_dir or scene_dir.parent / "samples"
         self._next_seed = 1
+        self._resizes = 0
         self.domain = domain
         self.manifest: dict[str, Any] = json.loads(
             (scene_dir / "manifest.json").read_text(encoding="utf-8")
         )
+        # The geometry before any resize, restored by reset.
+        self.base_dir, self.base_manifest = self.scene_dir, self.manifest
         self.lock = threading.Lock()
         self.engine = self._fresh_engine()
         # Off unless enabled (LAGNAV_LANGUAGE=claude): the rule parser handles everything it
@@ -77,8 +94,39 @@ class ViewerApp:
         state = scene_state(self.engine, self.manifest)
         state["language"] = "claude" if self.translator is not None else "rules"
         state["sampling"] = self.sampler is not None
+        state["resizing"] = self.resizer is not None
         state["generated"] = self.manifest.get("generated")
+        state["resized"] = self.manifest.get("resized", [])
         return state
+
+    def _set_geometry(self, scene_dir: Path, manifest: dict[str, Any]) -> str:
+        """A new base geometry: sizes in the AWR go back to 1, since this geometry has none."""
+        self.scene_dir, self.manifest = scene_dir, manifest
+        self.base_dir, self.base_manifest = scene_dir, manifest
+        scene, editor = self.engine.scene, self.engine.editor
+        if scene is None or editor is None:
+            return ""
+        resized = [e for e in scene.ids() if scene.get(e).state.transform.scale != (1.0, 1.0, 1.0)]
+        for entity in resized:
+            before = scene.get(entity).state.transform
+            editor.apply(
+                SetTransform((entity,), Transform(before.translation, before.rotation)),
+                command_text="new geometry",
+            )
+        if not resized:
+            return ""
+        return f" Sizes reset for {len(resized)} resized structure{'s' * (len(resized) != 1)}."
+
+    def _resize(self, entity: str, factor: float) -> tuple[bool, str]:
+        """The language layer's resize hook: reshape into a new folder, swap on success."""
+        if self.resizer is None:
+            return False, "Resizing needs a shape model: start the viewer with --model."
+        self._resizes += 1
+        out = self.samples_dir / f"resize-{self._resizes}"
+        ok, message, manifest = self.resizer(self.scene_dir, self.manifest, entity, factor, out)
+        if ok and manifest is not None:
+            self.scene_dir, self.manifest = out, manifest
+        return ok, message
 
     def sample(self, seed: int | None = None) -> dict[str, Any]:
         """Swap in a generated thorax, keeping the scene state.
@@ -96,7 +144,7 @@ class ViewerApp:
             if seed is None:
                 seed, self._next_seed = self._next_seed, self._next_seed + 1
             manifest = self.sampler(seed, self.samples_dir / f"seed-{seed}")
-            self.scene_dir, self.manifest = self.samples_dir / f"seed-{seed}", manifest
+            reset_note = self._set_geometry(self.samples_dir / f"seed-{seed}", manifest)
             checks = manifest.get("checks", {})
             verdict = (
                 "passes the quality checks"
@@ -105,20 +153,18 @@ class ViewerApp:
             )
             return {
                 "ok": True,
-                "message": f"Generated thorax, seed {seed}: {verdict}.",
+                "message": f"Generated thorax, seed {seed}: {verdict}.{reset_note}",
                 "state": self._state(),
             }
 
     def original(self) -> dict[str, Any]:
         """Back to the real subject's geometry."""
         with self.lock:
-            self.scene_dir = self.original_dir
-            self.manifest = json.loads(
-                (self.scene_dir / "manifest.json").read_text(encoding="utf-8")
-            )
+            manifest = json.loads((self.original_dir / "manifest.json").read_text(encoding="utf-8"))
+            reset_note = self._set_geometry(self.original_dir, manifest)
             return {
                 "ok": True,
-                "message": f"Real subject {self.manifest.get('subject')}.",
+                "message": f"Real subject {self.manifest.get('subject')}.{reset_note}",
                 "state": self._state(),
             }
 
@@ -137,8 +183,10 @@ class ViewerApp:
             program: dict[str, Any] | None = None
             commands: list[str] = []
             source = "rules"
+            before = self.scene_dir
             try:
-                result = LanguageLayer(self.engine, self.translator).execute(text)
+                hook = self._resize if self.resizer is not None else None
+                result = LanguageLayer(self.engine, self.translator, resize=hook).execute(text)
                 ok, message, source = result.ok, result.message, result.source
                 program, commands = result.program, result.commands
             except Exception as exc:  # noqa: BLE001 - reported to the page, not swallowed
@@ -149,6 +197,7 @@ class ViewerApp:
                 "source": source,
                 "program": program,
                 "commands": commands,
+                "geometry_changed": self.scene_dir != before,
                 "state": self._state(),
             }
 
@@ -160,7 +209,14 @@ class ViewerApp:
         """Start the scene again."""
         with self.lock:
             self.engine = self._fresh_engine()
-            return {"ok": True, "message": "Scene reset.", "state": self._state()}
+            changed = self.scene_dir != self.base_dir
+            self.scene_dir, self.manifest = self.base_dir, self.base_manifest
+            return {
+                "ok": True,
+                "message": "Scene reset." + (" Resizes undone." if changed else ""),
+                "geometry_changed": changed,
+                "state": self._state(),
+            }
 
 
 def _handler(app: ViewerApp) -> type[BaseHTTPRequestHandler]:
@@ -266,6 +322,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     sampler = None
+    resizer: Resizer | None = None
     if args.model is not None:
         from shapes.generate import write_sample_scene
         from shapes.joint import JointModel
@@ -281,7 +338,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         def sampler(seed: int, out: Path) -> dict[str, Any]:
             return write_sample_scene(joint, out, seed=seed, provenance=provenance)
 
-    server = make_server(ViewerApp(args.scene, sampler=sampler), args.port)
+        models_dir = args.model.parent.parent
+        if (models_dir / "validity.json").is_file():
+            from shapes.resize import Resizer as ShapeResizer
+
+            shape_resizer = ShapeResizer(models_dir)
+
+            def resizer(
+                scene: Path, manifest: dict[str, Any], entity: str, factor: float, out: Path
+            ) -> tuple[bool, str, dict[str, Any] | None]:
+                outcome = shape_resizer.resize(scene, manifest, entity, factor, out)
+                return outcome.ok, outcome.message, outcome.manifest
+
+        else:
+            print("No validity.json beside the model: resizing is off.", flush=True)
+
+    app = ViewerApp(args.scene, sampler=sampler, resizer=resizer)
+    server = make_server(app, args.port)
     print(f"Lagnav viewer on http://127.0.0.1:{server.server_address[1]}/", flush=True)
     try:
         server.serve_forever()

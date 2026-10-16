@@ -242,3 +242,20 @@ of the frozen protocol.
     inside the coarse right-lung template, and 7.4% of the myocardium inside the left lung.
     Calibration accounts for this level, which exists in real data.
   - About 12 s per thorax.
+- **`resize` end to end, ready for the real model** (ADR-L2-001).
+  - **Request.** "Make the left ventricle 20% larger" is read by a rule, so it works without
+    the language model. The language model can emit the same operation.
+  - **Geometry.** The current shape is scaled and projected onto the entity's own shape model
+    (weights clipped at 3 SD). Only that entity's mesh changes. The result is checked against
+    the calibrated validity limits, and refused with the reason if it fails.
+  - **AWR.** Only after the geometry succeeds is the size written to the AWR, as the existing
+    `Transform.scale`.
+  - **Viewer.** Reset undoes resizes; a new geometry resets sizes and says so.
+  - **Design constraint, recorded.** A new parser intent would have changed the research
+    neural vocabulary (`ProgramOpType`) and so the frozen results. `resize` is therefore a
+    product operation instead.
+  - **Tests (sphere populations).**
+    - +5% is reached within 1%, and every other mesh is bit-identical.
+    - +30% beyond the training volumes is refused, and nothing is written.
+    - A neighbour moved against the ventricle blocks it.
+    - Groups, unknown names and changes over 30% are refused before any geometry work.

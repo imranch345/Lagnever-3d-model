@@ -128,8 +128,12 @@ class TestTheServer:
 
     def test_the_page_and_assets_are_served(self, server: str) -> None:
         """The page, its script, the scene and the manifest."""
-        for path, needle in (("/", b"Lagnav"), ("/app.js", b"GLTFLoader"),
-                             ("/scene.glb", b"glTF"), ("/manifest.json", b"CC BY 4.0")):
+        for path, needle in (
+            ("/", b"Lagnav"),
+            ("/app.js", b"GLTFLoader"),
+            ("/scene.glb", b"glTF"),
+            ("/manifest.json", b"CC BY 4.0"),
+        ):
             status, body = _get(server + path)
             assert status == 200, path
             assert needle in body, path
@@ -166,8 +170,9 @@ class TestTheServer:
         ],
         ids=["bad-json", "empty-text", "not-an-object", "unknown-path", "too-large"],
     )
-    def test_bad_requests_are_refused(self, server: str, path: str, body: bytes,
-                                      expected: int) -> None:
+    def test_bad_requests_are_refused(
+        self, server: str, path: str, body: bytes, expected: int
+    ) -> None:
         """Each with a JSON error, never a stack trace."""
         status, payload = _post(server + path, body)
         assert status == expected
@@ -237,3 +242,70 @@ class TestTheLanguageLayerInTheServer:
         assert reply["ok"] and reply["source"] == "claude"
         assert reply["commands"] == ["hide respiratory.lungs"]
         assert reply["state"]["language"] == "claude"
+
+
+class TestResizeInTheServer:
+    """A resize swaps geometry, the state shows the size, and new geometry resets it."""
+
+    def _app(self, tmp_path: Path) -> tuple[ViewerApp, list[float]]:
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "manifest.json").write_text(json.dumps(MANIFEST), encoding="utf-8")
+        factors: list[float] = []
+
+        def resizer(
+            scene: Path, manifest: dict[str, Any], entity: str, factor: float, out: Path
+        ) -> tuple[bool, str, dict[str, Any] | None]:
+            factors.append(factor)
+            if factor > 1.25:
+                return False, "outside real anatomy", None
+            out.mkdir(parents=True)
+            written = {**manifest, "resized": [*manifest.get("resized", []), {"entity": entity}]}
+            (out / "manifest.json").write_text(json.dumps(written), encoding="utf-8")
+            return True, f"{entity} resized", written
+
+        def sampler(seed: int, out: Path) -> dict[str, Any]:
+            out.mkdir(parents=True, exist_ok=True)
+            return {**MANIFEST, "generated": {"seed": seed}}
+
+        app = ViewerApp(real, resizer=resizer, sampler=sampler, samples_dir=tmp_path / "s")
+        return app, factors
+
+    @staticmethod
+    def _size(reply: dict[str, Any], entity: str = "heart.left_ventricle") -> float:
+        return next(e["size"] for e in reply["state"]["entities"] if e["id"] == entity)
+
+    def test_a_resize_swaps_geometry_and_records_the_size(self, tmp_path: Path) -> None:
+        """Applied: new folder, size in the state, and the page told to reload."""
+        app, factors = self._app(tmp_path)
+        reply = app.command("make the left ventricle 20% larger")
+        assert reply["ok"] and reply["geometry_changed"] and factors == [1.2]
+        assert self._size(reply) == 1.2 and reply["state"]["resizing"] is True
+        assert app.scene_dir == tmp_path / "s" / "resize-1"
+        assert reply["state"]["resized"] == [{"entity": "heart.left_ventricle"}]
+
+    def test_a_refused_resize_changes_nothing(self, tmp_path: Path) -> None:
+        """Not applied: same folder, size 1, the reason in the reply."""
+        app, _ = self._app(tmp_path)
+        reply = app.command("make the left ventricle 30% larger")
+        assert not reply["ok"] and not reply["geometry_changed"]
+        assert reply["message"] == "outside real anatomy" and self._size(reply) == 1.0
+
+    def test_reset_and_new_geometry_undo_sizes(self, tmp_path: Path) -> None:
+        """Reset restores the geometry before the resizes; a sample resets sizes and says so."""
+        app, _ = self._app(tmp_path)
+        app.command("make the left ventricle 10% larger")
+        reset = app.reset()
+        assert reset["geometry_changed"] and app.scene_dir == tmp_path / "real"
+        assert self._size(reset) == 1.0
+        app.command("make the left ventricle 10% larger")
+        sampled = app.sample(3)
+        assert "Sizes reset for 1 resized structure." in sampled["message"]
+        assert self._size(sampled) == 1.0
+
+    def test_without_a_model_resize_says_how(self, tmp_path: Path) -> None:
+        """No resizer: refused with the way to enable it."""
+        (tmp_path / "manifest.json").write_text(json.dumps(MANIFEST), encoding="utf-8")
+        reply = ViewerApp(tmp_path).command("make the left ventricle 10% larger")
+        assert not reply["ok"] and "--model" in reply["message"]
+        assert reply["state"]["resizing"] is False

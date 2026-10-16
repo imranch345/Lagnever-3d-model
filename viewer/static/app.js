@@ -178,6 +178,7 @@ async function run(text) {
   }
   log(body.message, body.ok ? 'ok' : 'bad');
   state = body.state;
+  if (body.geometry_changed) await loadScene();
   applyState();
 }
 
@@ -207,9 +208,16 @@ reset.addEventListener('click', async () => {
   const body = await res.json();
   log(body.message, 'ok');
   state = body.state;
+  if (body.geometry_changed) await loadScene();
   applyState();
 });
 $('chips').append(reset);
+const grow = document.createElement('button');
+grow.type = 'button';
+grow.textContent = 'Make the left ventricle 15% larger';
+grow.hidden = true;
+grow.addEventListener('click', () => run(grow.textContent));
+$('chips').append(grow);
 
 // Hover names a structure; a click explains it.
 const ray = new THREE.Raycaster();
@@ -253,6 +261,7 @@ function showHeader() {
     ` · ${c.attribution}`,
   );
   $('sampling').hidden = !state.sampling;
+  grow.hidden = !state.resizing;
 }
 
 // Load (or reload) the current scene's meshes. The AWR state is untouched: a new geometry is
