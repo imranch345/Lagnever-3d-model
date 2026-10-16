@@ -80,8 +80,13 @@ def write_sample_scene(
     spread: float = 1.0,
     provenance: Mapping[str, Any] | None = None,
     ontology: AnatomyOntology | None = None,
+    limits: Any = None,
 ) -> dict[str, Any]:
-    """Draw, mesh, measure and write one sample; return its manifest."""
+    """Draw, mesh, measure and write one sample; return its manifest.
+
+    With ``limits`` (``shapes.validity.Limits``), the sample also goes through the validity
+    checks, and the manifest records the verdict under ``validity``.
+    """
     ontology = ontology or load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
     coefficients = draw_coefficients(joint.model.n_modes, seed, spread)
     vertices = joint.sample_entities(coefficients)
@@ -128,6 +133,14 @@ def write_sample_scene(
         "medical_status": MEDICAL_STATUS,
     }
     manifest["checks"] = asdict(assess(manifest))
+    if limits is not None:
+        # Imported here: shapes.validity draws its samples with this module.
+        from shapes.validity import face_normals, judge, measure
+
+        mean = joint.split(joint.model.mean)
+        normals = {e: face_normals(mean[e], joint.faces[e]) for e in joint.entities}
+        failures = judge(measure(vertices, joint.faces, normals), limits, ontology)
+        manifest["validity"] = {"passes": not failures, "failures": [m for _, m in failures]}
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 

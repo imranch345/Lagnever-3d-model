@@ -83,3 +83,54 @@ do. Consistency is instead enforced by the overlap check.
 viewer shows; the reply always states both. The overlap limits come from coarse templates
 that already overlap a little in real subjects. A resize that stays within those limits can
 still touch a neighbour more than real anatomy does.
+
+---
+
+## Amendment 1 — 2026-10-16, after the first real-anatomy tests
+
+**What was found.** On subject s0029 (real CT), every resize first tried was refused:
+LV +15% and −15%, RA +20%, left lung +10%. Most failures were overlaps against neighbours.
+The left ventricle sits inside the myocardium, so a larger LV pushes through it: "62% of the
+LV inside the myocardium". Two alternatives were then tested, and both failed:
+
+* **The joint model, conditioned on the target size.** It does not grow the LV alone. Its
+  first mode is overall size (45%), so +15% LV became about +11% for the whole thorax, and it
+  still collided, now with the lungs.
+* **The LV and the myocardium together**, about the LV's centre. Already at +5% this collides
+  with the left atrium and right ventricle.
+
+A linear shape model, edited one structure at a time, cannot grow a chamber that is packed
+against its neighbours. Real anatomy does that by deforming the neighbours, which these
+models do not represent.
+
+**What changes.**
+
+1. **The checks run on correspondence meshes**, the kind the limits were calibrated on, and
+   only for pairs involving the resized entity. Before, they ran on the scene's raw meshes.
+   This is the consistent comparison, and it is about four times faster.
+2. **"No worse than real anatomy, nor than this subject already is."** A check fails only if
+   the resized shape exceeds both the calibrated limit and the subject's own current value.
+   A subject slightly beyond a training extreme can then still be edited in a direction that
+   does not make it worse.
+3. **A refusal offers the largest change that passes**, in the asked direction, found by
+   bisection to 1%. Example: "The largest increase that passes for this subject is +2%."
+4. **A typed "reset the scene" undoes resizes**, as the Reset button does. Before, it reset
+   only visibility and opacity, leaving a resized geometry with a reset view.
+
+**Measured on s0029 after the change:**
+
+| request | result | largest that passes |
+| --- | --- | --- |
+| LV −15% | applied: −15.0% size, −38.7% volume, 0.6 mm from plain scaling | – |
+| right lung −10% | applied | – |
+| LV +15% | refused: through the myocardium and LA | +2% |
+| RV +10% | refused: into the RA | +2% |
+| LA +10% | refused: into the LV | +5% |
+| RA +20% | refused: into the RV | +5% |
+| left lung +10% | refused: volume above the training maximum | +6% |
+| myocardium +5% | refused: into the RV | none |
+
+**Consequence.** Shrinking works across the range. Growing is limited to a few percent by
+the neighbours. That is the honest capability of Stage 2a. Growing a structure while its
+neighbours give way is a reason for a deformation-aware model (Stage 2b). That stage needs a
+GPU budget, which the user decides on.

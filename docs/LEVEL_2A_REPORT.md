@@ -1,7 +1,7 @@
 # Level 2a report: statistical shape models of the heart and lungs, from real CT
 
-**Status:** results for registration and models are final. Validity and resize are added
-below as they finish.
+**Status:** complete for Stage 2a: registration, models, validity and resize. Amendments to
+the resize design are recorded in ADR-L2-001.
 **Date:** 2026-10-16
 **Plan:** [`LEVEL_2_PLAN.md`](LEVEL_2_PLAN.md) §3
 **Decisions:** [ADR-L2-001](adr/ADR-L2-001-resize-through-the-shape-model.md)
@@ -26,7 +26,15 @@ model. It is not a measurement of anyone.
   - the joint model of all seven entities to **4.3 mm**.
 * **Generation.** New thoraxes are drawn from the joint model and appear in the viewer under
   the same AWR and language control as real scans.
-* **Validity and control:** §6 and §7.
+* **Validity.**
+  - At 0.5 SD every sample passes checks calibrated on real anatomy (50 of 50).
+  - At 1 SD, 78% pass, against 90.5% of real held-out subjects. The gap is mostly the left
+    atrium pushed into the right lung.
+  - The viewer samples at 0.5 SD.
+* **Control.** A sentence resizes one structure within its own model. On a real heart,
+  shrinking works across the range: LV −15% is applied, at 0.6 mm from plain scaling.
+  Growing is refused beyond 2–6%, because neighbours do not give way in a linear model; the
+  reply then offers the largest change that passes.
 
 ## 2. Question
 
@@ -130,20 +138,92 @@ Four subjects failed both lungs (s0436, s0494, s0553, s0629).
 
 ## 6. Validity of generated thoraxes
 
-*Running.* `shapes.validity` with three checks that can fail, each calibrated on the training
-subjects as no worse than the worst of them:
+**Checks that can fail** (`shapes.validity`). A deformed template is closed and in one piece
+by construction, so the Level 1 hard checks pass almost every sample. Three checks are added,
+each calibrated on the 98 joint-model training subjects as "no worse than the worst of them":
 
-* folding;
-* overlap deeper than 2 mm between entities;
-* volume range.
+* **folding:** the share of faces whose normal points against the mean shape's. Limit: the
+  worst training subject plus one percentage point.
+* **overlap:** for every ordered pair of entities, the share of one's vertices more than 2 mm
+  inside the other. Limit: the same rule.
+* **volume:** within the training minimum and maximum, with no margin.
 
-Held-out real subjects are the control.
+**Control.** The same checks run on the 21 held-out real subjects that have all seven
+entities registered. **19 of 21 pass (90.5%).** Both failures are real lungs larger than any
+training lung:
+- s0115: left lung 3956 mL against a maximum of 3870;
+- s0657: lungs 4057 and 4795 mL, plus 12% of its myocardium inside its left lung.
+
+So the checks reject about 1 real subject in 10. That is their false-reject rate, mostly from
+the strict volume range.
+
+**Sweep.** 50 samples per spread, the same seeds at every spread, weights clipped at 3 SD:
+
+| spread (SD) | pass every check | fail folding | fail overlap | fail volume |
+| --- | --- | --- | --- | --- |
+| 0.5 | **100%** | 0% | 0% | 0% |
+| 1.0 | 78% | 0% | 14% | 10% |
+| 1.5 | 40% | 12% | 38% | 32% |
+| 2.0 | 18% | 40% | 50% | 54% |
+| 2.5 | 10% | 50% | 58% | 70% |
+| 3.0 | 6% | 58% | 58% | 78% |
+
+**Usable spread** (pass rate at least 95%): **0.5 SD**. The viewer now samples there, and
+every generated scene records its own validity verdict.
+
+**Reading.**
+
+* **At 1 SD**, a spread at which samples are distributed like the training subjects, 78% pass
+  against 90.5% of real held-out subjects. The gap of about 12 points is overlap. The commonest
+  failure is the left atrium pushed 2–4% into the right lung, and sometimes into the left
+  ventricle. Independent linear modes produce combinations that real anatomy does not.
+* **Lung folding** appears from 1.5 SD: 3–8% of faces turned against the mean. Large lung
+  modes fold thin regions.
+* **Variety at 0.5 SD is limited.** Each weight is half a standard deviation. Generated
+  thoraxes are plausible, but closer to average than real people are.
 
 ## 7. Control: resizing one structure
 
-*Pending the validity limits.* Resize is ADR-L2-001. A sentence asks for a percentage change
-in one structure's size. The structure is reshaped within its own model, and every other mesh
-stays bit-identical. The result is refused if it fails the validity limits.
+**Design** ([ADR-L2-001](adr/ADR-L2-001-resize-through-the-shape-model.md), with Amendment 1).
+- "Make the left ventricle 20% larger" is read by a rule; the language model can emit the
+  same operation.
+- The structure's current shape is scaled about its centre and projected onto its own shape
+  model, with weights clipped at 3 SD.
+- The result is checked against every other modelled structure with the validity limits,
+  judged as "no worse than real anatomy, nor than this subject already is".
+- If it passes, only that structure's mesh changes, and the AWR records the size.
+- If it fails, nothing changes, and the reply gives the reason and the largest change that
+  does pass.
+
+**On a real heart (s0029):**
+
+| request | result | largest that passes |
+| --- | --- | --- |
+| left ventricle −15% | **applied**: −15.0% size, −38.7% volume, 0.6 mm from plain scaling | – |
+| right lung −10% | **applied** | – |
+| left ventricle +15% | refused: through the myocardium and left atrium | +2% |
+| right ventricle +10% | refused: into the right atrium | +2% |
+| left atrium +10% | refused: into the left ventricle | +5% |
+| right atrium +20% | refused: into the right ventricle | +5% |
+| left lung +10% | refused: volume above the training maximum | +6% |
+| myocardium +5% | refused: into the right ventricle | none |
+
+Evidence: [before](evidence/2026-10-16_resize_s0029_lv_before.jpg),
+[after −15%](evidence/2026-10-16_resize_s0029_lv_minus15.jpg),
+[+15% refused with the offer](evidence/2026-10-16_resize_s0029_lv_plus15_refused.jpg).
+
+**Two alternatives were tested for growth, and both fail.**
+- **The joint model, conditioned on the target size.** It does not grow the LV alone. Its
+  first mode is overall size, so the whole thorax grows about 11%, and it still collides
+  with the lungs.
+- **The LV and the myocardium together.** At +5% they collide with the left atrium and right
+  ventricle.
+
+**Finding.** A linear statistical shape model, edited one structure at a time, can shrink a
+cardiac structure across a wide range. It can grow one by only a few percent, because the
+chambers are packed against each other and against the lungs. Real enlargement deforms the
+neighbours, and these models do not represent that. This is the clearest argument so far for
+a deformation-aware model (Stage 2b).
 
 ## 8. Problems found, and what was done
 
@@ -158,6 +238,9 @@ Each was found before or during the build, and each is in the notebook with its 
 | machine restart | the build stopped at 114 of 200 | two hours redone | `--skip-built` resume |
 | first look in the viewer | generated lungs invisible at the default level of detail | "it works" claimed on a broken view | the `drawn` fallback between shell and parts |
 | first look in the viewer | generated scenes written under the real subjects | samples counted as scans by the next quality run | written beside the model instead |
+| validity sweep | the viewer sampled at 1 SD, where 22% of samples fail the validity checks | implausible thoraxes shown as generated anatomy | sample at the usable spread (0.5 SD), and record each sample's own verdict |
+| resize on real anatomy | every first request refused; checks ran on raw meshes against limits calibrated on correspondence | a feature that says no without saying what would work | checks on correspondence; "no worse than the subject already is"; refusals offer the largest change that passes |
+| demo in the viewer | a typed "reset the scene" kept resized geometry while the Reset button undid it | a reset view over a resized heart, and confusing refusals | a typed reset undoes resizes too |
 
 ## 9. Limitations
 
@@ -171,6 +254,12 @@ Each was found before or during the build, and each is in the notebook with its 
 * **Surface fit is not anatomical correspondence.** It is the measurable part. Landmark-based
   checks were not made.
 * **One split, one seed.** No cross-validation yet. The numbers above carry that uncertainty.
+* **Generated variety is limited.** Generation is validated only at 0.5 SD. At 1 SD, one in
+  five samples has structures running into each other.
+* **The volume check is strict.** It rejects about 1 real held-out subject in 10, both times
+  for lungs larger than any training lung.
+* **Resizing can grow a structure only a little.** On s0029, growth is limited to +2 to +6%.
+  A deformation-aware model is needed for more.
 
 ## 10. Reproduce
 

@@ -420,3 +420,52 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Tests:** 7 in `tests/test_dashboard.py`. They cover job states, verdicts, whitelists, path
   traversal and every route.
 - **Evidence:** `docs/evidence/2026-10-16_dashboard_step21_live.jpg`.
+
+## 2026-10-16 (14:17) — Validity of generated thoraxes
+
+- **Control.** 19 of 21 held-out real subjects pass the validity checks (90.5%). Both
+  failures are lungs larger than any training lung, so the strict volume range is the checks'
+  false-reject source.
+- **Samples, 50 per spread:**
+
+  | spread | pass rate |
+  | --- | --- |
+  | 0.5 SD | **100%** |
+  | 1.0 SD | 78% |
+  | 1.5 SD | 40% |
+  | 2.0 SD | 18% |
+  | 3.0 SD | 6% |
+
+  **Usable spread: 0.5 SD.**
+- **Why samples fail.**
+  - At 1 SD, mostly overlap: the left atrium pushed 2–4% into the right lung.
+  - From 1.5 SD, lung folding.
+  - Independent linear modes make combinations real anatomy does not.
+- **Action.** The viewer now samples at 0.5 SD, and each sample records its own validity
+  verdict. Seed 11 at 0.5 SD passes both the quality and validity checks.
+
+## 2026-10-16 (15:00–15:40) — Resize on a real heart: a negative result, then a working design
+
+- **Second machine restart at about 14:24.** Step 21 resumed at 14:57; point 200's branches
+  05–07 rerun from their saved state.
+- **First real test, s0029.** Every request was refused: LV ±15%, RA +20%, left lung +10%.
+  "62% of the LV inside the myocardium."
+- **Alternatives tested, and both failed:**
+  - joint-model conditioning grows the whole thorax by about 11% and still collides;
+  - LV with myocardium collides with the LA and RV at +5%.
+- **Finding.** A linear shape model edited one structure at a time can shrink a structure
+  across the range, but grow it only a few percent.
+- **Design amended** (ADR-L2-001, Amendment 1):
+  - checks on correspondence meshes;
+  - "no worse than the subject already is";
+  - refusals offer the largest passing change;
+  - a typed reset undoes resizes.
+- **Result on s0029:**
+  - applied: LV −15% (−15.0% size, −38.7% volume, 0.6 mm from plain scaling) and right
+    lung −10%;
+  - largest increases that pass: LV +2%, RV +2%, LA +5%, RA +5%, left lung +6%;
+  - myocardium: no change passes.
+- **Evidence:** before and after screenshots and the refusal with its offer, in `docs/evidence/`.
+- **Tests:** a refusal's offer passes, and one percent more does not. An existing overlap
+  does not block a change that eases it. A typed reset matches the button. A sample carries
+  its validity verdict.

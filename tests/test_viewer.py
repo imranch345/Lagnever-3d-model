@@ -339,6 +339,14 @@ class TestResizeInTheServer:
         assert "Sizes reset for 1 resized structure." in sampled["message"]
         assert self._size(sampled) == 1.0
 
+    def test_a_typed_reset_undoes_resizes_like_the_button(self, tmp_path: Path) -> None:
+        """'reset the scene' typed: base geometry back, sizes back to 1, page told to reload."""
+        app, _ = self._app(tmp_path)
+        app.command("make the left ventricle 10% larger")
+        reply = app.command("reset the scene")
+        assert reply["ok"] and reply["geometry_changed"] and "Resizes undone" in reply["message"]
+        assert app.scene_dir == tmp_path / "real" and self._size(reply) == 1.0
+
     def test_without_a_model_resize_says_how(self, tmp_path: Path) -> None:
         """No resizer: refused with the way to enable it."""
         (tmp_path / "manifest.json").write_text(json.dumps(MANIFEST), encoding="utf-8")

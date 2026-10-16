@@ -311,6 +311,25 @@ class TestJointModelAndSamples:
         loaded = trimesh.load(tmp_path / "a" / "scene.glb", force="scene")
         assert set(loaded.graph.nodes_geometry) == set(shapes)
 
+    def test_a_sample_can_carry_its_validity_verdict(self, tmp_path: Path) -> None:
+        """With limits, the manifest says whether the sample passes the validity checks."""
+        from shapes.generate import write_sample_scene
+        from shapes.joint import fit_joint
+        from shapes.validity import calibrate, face_normals, measure
+
+        shapes, faces, subjects = _sphere_population()
+        joint = fit_joint(shapes, faces, subjects)
+        mean = joint.split(joint.model.mean)
+        normals = {e: face_normals(mean[e], joint.faces[e]) for e in joint.entities}
+        limits = calibrate(
+            [measure({e: shapes[e][s] for e in shapes}, joint.faces, normals) for s in subjects]
+        )
+        near = write_sample_scene(joint, tmp_path / "a", seed=3, spread=0.0, limits=limits)
+        assert near["validity"] == {"passes": True, "failures": []}
+        far = write_sample_scene(joint, tmp_path / "b", seed=3, spread=3.0, limits=limits)
+        assert far["validity"]["passes"] is False and far["validity"]["failures"]
+        assert "validity" not in write_sample_scene(joint, tmp_path / "c", seed=3)
+
     def test_the_viewer_swaps_geometry_and_keeps_scene_state(self, tmp_path: Path) -> None:
         """A sample changes the meshes served, not what the engine says is hidden."""
         from shapes.generate import write_sample_scene
@@ -462,19 +481,33 @@ class TestResize:
         assert not (tmp_path / "r").exists()
 
     def test_running_into_a_neighbour_is_refused(self, tmp_path: Path) -> None:
-        """The current neighbours are what is checked: an RV moved against the LV blocks it."""
-        from shapes.register import load_scene
-
+        """Checked on correspondence: an RV already touching the LV blocks the LV's growth."""
         resizer, scene, manifest = self._resizable(tmp_path)
-        meshes = load_scene(scene)
-        meshes["heart.right_ventricle"].apply_translation([20.0, 0.0, -10.0])
-        crowded = trimesh.Scene()
-        for name, mesh in meshes.items():
-            crowded.add_geometry(mesh, node_name=name, geom_name=name)
-        (scene / "scene.glb").write_bytes(crowded.export(file_type="glb"))
+        shapes = resizer.base_shapes(scene, manifest)
+        lv, rv = shapes["heart.left_ventricle"], shapes["heart.right_ventricle"]
+        direction = rv.mean(axis=0) - lv.mean(axis=0)
+        direction /= np.linalg.norm(direction)
+        # 21 mm apart: radii of 12 overlap by 3 mm already; growth only deepens it.
+        shapes["heart.right_ventricle"] = rv - rv.mean(axis=0) + lv.mean(axis=0) + 21 * direction
+        np.savez_compressed(
+            scene / "correspondence.npz", **{e.replace(".", "__"): v for e, v in shapes.items()}
+        )
         outcome = resizer.resize(scene, manifest, "heart.left_ventricle", 1.05, tmp_path / "r")
         assert not outcome.ok
         assert any("inside" in f for f in outcome.failures), outcome.failures
+        shrink = resizer.resize(scene, manifest, "heart.left_ventricle", 0.95, tmp_path / "s")
+        assert shrink.ok, "an overlap the subject already had may not block a change that eases it"
+
+    def test_a_refusal_offers_the_largest_change_that_passes(self, tmp_path: Path) -> None:
+        """+30% fails on volume; the offered percentage then succeeds, and one more does not."""
+        resizer, scene, manifest = self._resizable(tmp_path)
+        lv = "heart.left_ventricle"
+        refused = resizer.resize(scene, manifest, lv, 1.30, tmp_path / "a")
+        assert not refused.ok and refused.feasible_percent is not None
+        best = refused.feasible_percent
+        assert 0 < best < 30 and f"+{best}%" in refused.message
+        assert resizer.resize(scene, manifest, lv, 1 + best / 100, tmp_path / "b").ok
+        assert not resizer.resize(scene, manifest, lv, 1 + (best + 1) / 100, tmp_path / "c").ok
 
     def test_what_cannot_be_resized_says_why(self, tmp_path: Path) -> None:
         """No model for the entity, or no correspondence for the scene: refused with a reason."""

@@ -216,7 +216,7 @@ reset.addEventListener('click', async () => {
 $('chips').append(reset);
 const grow = document.createElement('button');
 grow.type = 'button';
-grow.textContent = 'Make the left ventricle 15% larger';
+grow.textContent = 'Make the left ventricle 10% smaller';
 grow.hidden = true;
 grow.addEventListener('click', () => run(grow.textContent));
 $('chips').append(grow);

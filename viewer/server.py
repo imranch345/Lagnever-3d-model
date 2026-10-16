@@ -151,6 +151,16 @@ class ViewerApp:
                 if checks.get("usable")
                 else f"fails: {'; '.join(checks.get('hard', []))}"
             )
+            validity = manifest.get("validity")
+            if validity is not None:
+                verdict += (
+                    " and the validity checks"
+                    if validity["passes"]
+                    else f"; fails validity: {'; '.join(validity['failures'][:3])}"
+                )
+            spread = manifest.get("generated", {}).get("spread")
+            if spread is not None:
+                verdict = f"drawn at {spread:g} SD, {verdict}"
             return {
                 "ok": True,
                 "message": f"Generated thorax, seed {seed}: {verdict}.{reset_note}",
@@ -189,6 +199,9 @@ class ViewerApp:
                 result = LanguageLayer(self.engine, self.translator, resize=hook).execute(text)
                 ok, message, source = result.ok, result.message, result.source
                 program, commands = result.program, result.commands
+                if "reset_view" in result.operations:
+                    # A typed reset does what the Reset button does: resizes are undone too.
+                    message += self._undo_resizes()
             except Exception as exc:  # noqa: BLE001 - reported to the page, not swallowed
                 ok, message = False, f"{type(exc).__name__}: {exc}"
             return {
@@ -205,15 +218,22 @@ class ViewerApp:
         """Whether free-form text can reach the language model."""
         return self.translator is not None
 
+    def _undo_resizes(self) -> str:
+        """Back to the geometry before any resize, with every size in the AWR back to 1."""
+        if self.scene_dir == self.base_dir:
+            return ""
+        self._set_geometry(self.base_dir, self.base_manifest)
+        return " Resizes undone."
+
     def reset(self) -> dict[str, Any]:
         """Start the scene again."""
         with self.lock:
             self.engine = self._fresh_engine()
             changed = self.scene_dir != self.base_dir
-            self.scene_dir, self.manifest = self.base_dir, self.base_manifest
+            note = self._undo_resizes()
             return {
                 "ok": True,
-                "message": "Scene reset." + (" Resizes undone." if changed else ""),
+                "message": "Scene reset." + note,
                 "geometry_changed": changed,
                 "state": self._state(),
             }
@@ -325,10 +345,23 @@ def build_app(scene: Path, model: Path | None = None) -> ViewerApp:
             else None
         )
 
-        def sampler(seed: int, out: Path) -> dict[str, Any]:
-            return write_sample_scene(joint, out, seed=seed, provenance=provenance)
-
         models_dir = model.parent.parent
+        validity_path = models_dir / "validity.json"
+        limits = None
+        spread = 1.0
+        if validity_path.is_file():
+            from shapes.validity import Limits
+
+            validity = json.loads(validity_path.read_text(encoding="utf-8"))
+            limits = Limits.from_dict(validity["limits"])
+            # The plan's rule: sample at the largest spread whose pass rate met the target.
+            spread = float(validity.get("usable_spread") or 1.0)
+
+        def sampler(seed: int, out: Path) -> dict[str, Any]:
+            return write_sample_scene(
+                joint, out, seed=seed, spread=spread, provenance=provenance, limits=limits
+            )
+
         if (models_dir / "validity.json").is_file():
             from shapes.resize import Resizer as ShapeResizer
 

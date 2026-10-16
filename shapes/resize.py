@@ -11,9 +11,16 @@ Before anything is written, the new shape goes through the validity checks
 
 * folding against the model mean;
 * volume within the training range;
-* overlap deeper than 2 mm, both ways, with every other entity's current mesh.
+* overlap deeper than 2 mm, both ways, with every other modelled entity.
 
-If any check fails, nothing is written and the reason is returned.
+All three are measured on correspondence meshes, the kind the limits were calibrated on.
+They are judged against "no worse than real anatomy, nor than this subject already is". A
+subject slightly beyond a training extreme can still be resized, so long as the change does
+not make that worse.
+
+If any check fails, nothing is written. The reply gives the reason and the largest change in
+the asked direction that does pass, found by bisection to 1%. On a real heart that is often
+small: a chamber is packed against its neighbours (Level 2a report, §7).
 
 The base shape must be in correspondence. It is found in this order:
 
@@ -65,6 +72,7 @@ class ResizeOutcome:
     volume_change: float | None = None
     from_plain_scaling_mm: float | None = None
     failures: tuple[str, ...] = ()
+    feasible_percent: int | None = None
     manifest: dict[str, Any] | None = field(default=None, repr=False)
 
     def record(self) -> dict[str, Any]:
@@ -169,12 +177,22 @@ class Resizer:
             "from_plain_scaling_mm": float(np.linalg.norm(resized - plain, axis=1).mean()),
         }
 
-        failures = self._check(entity, resized, faces, scene_dir)
+        baseline = self._measure(entity, current, shapes)
+        failures = self._check(entity, resized, shapes, baseline)
         if failures:
+            feasible = self._largest(entity, model, current, shapes, baseline, factor)
+            sign = "+" if factor > 1 else "-"
+            offer = (
+                f" The largest {('increase' if factor > 1 else 'decrease')} that passes for this "
+                f"subject is {sign}{feasible}%."
+                if feasible
+                else " No change of even 1% in that direction passes for this subject."
+            )
             return refuse(
-                f"Not applied: a {entity} {factor - 1:+.0%} in size is outside what the "
-                f"training anatomy shows ({'; '.join(failures)}).",
+                f"Not applied: {entity} {factor - 1:+.0%} in size is outside what the training "
+                f"anatomy shows ({'; '.join(failures)}).{offer}",
                 failures=tuple(failures),
+                feasible_percent=feasible,
                 **found,
             )
         written = self._write(scene_dir, manifest, entity, resized, shapes, out_dir, found, factor)
@@ -191,33 +209,70 @@ class Resizer:
             **found,
         )
 
-    def _check(
-        self, entity: str, resized: FloatArray, faces: npt.ArrayLike, scene_dir: Path
-    ) -> list[str]:
-        failures: list[str] = []
+    def _measure(
+        self, entity: str, shape: FloatArray, shapes: Mapping[str, FloatArray]
+    ) -> dict[str, float]:
+        """Folding, volume and overlap with every other entity, on correspondence meshes."""
+        faces = self.joint.faces[entity]
         mean = self.model(entity).mean
-        folded = float(
-            np.mean(np.sum(face_normals(resized, faces) * face_normals(mean, faces), axis=1) < 0)
-        )
-        if folded > self.limits.folding[entity]:
-            failures.append(f"{folded:.1%} of its faces fold")
-        volume = _volume(resized, faces) / 1000.0
-        low, high = self.limits.volume_ml[entity]
-        if not low <= volume <= high:
-            failures.append(f"volume {volume:.0f} mL outside {low:.0f}-{high:.0f} mL")
-        mesh = model_mesh(resized, faces)
-        for other, other_mesh in load_scene(scene_dir).items():
+        measures = {
+            "folding": float(
+                np.mean(np.sum(face_normals(shape, faces) * face_normals(mean, faces), axis=1) < 0)
+            ),
+            "volume": _volume(shape, faces) / 1000.0,
+        }
+        mesh = model_mesh(shape, faces)
+        for other in self.entities:
             if other == entity:
                 continue
-            for pair, share in (
-                (f"{entity}|{other}", overlap_share(mesh, other_mesh)),
-                (f"{other}|{entity}", overlap_share(other_mesh, mesh)),
-            ):
-                limit = self.limits.overlap.get(pair)
-                if limit is not None and share > limit:
-                    a, b = pair.split("|")
-                    failures.append(f"{share:.1%} of {a} inside {b}, real anatomy {limit:.1%}")
+            other_mesh = model_mesh(shapes[other], self.joint.faces[other])
+            measures[f"{entity}|{other}"] = overlap_share(mesh, other_mesh)
+            measures[f"{other}|{entity}"] = overlap_share(other_mesh, mesh)
+        return measures
+
+    def _check(
+        self,
+        entity: str,
+        shape: FloatArray,
+        shapes: Mapping[str, FloatArray],
+        baseline: Mapping[str, float],
+    ) -> list[str]:
+        """Failures of ``shape``: worse than real anatomy and worse than the subject was."""
+        found = self._measure(entity, shape, shapes)
+        failures: list[str] = []
+        if found["folding"] > max(self.limits.folding[entity], baseline["folding"]):
+            failures.append(f"{found['folding']:.1%} of its faces fold")
+        low, high = self.limits.volume_ml[entity]
+        low, high = min(low, baseline["volume"]), max(high, baseline["volume"])
+        if not low <= found["volume"] <= high:
+            failures.append(f"volume {found['volume']:.0f} mL outside {low:.0f}-{high:.0f} mL")
+        for pair, share in found.items():
+            limit = self.limits.overlap.get(pair)
+            if limit is not None and share > max(limit, baseline[pair]):
+                a, b = pair.split("|")
+                failures.append(f"{share:.1%} of {a} inside {b}, real anatomy {limit:.1%}")
         return failures
+
+    def _largest(
+        self,
+        entity: str,
+        model: ShapeModel,
+        current: FloatArray,
+        shapes: Mapping[str, FloatArray],
+        baseline: Mapping[str, float],
+        factor: float,
+    ) -> int | None:
+        """The largest whole-percent change towards ``factor`` that passes, or None."""
+        sign = 1 if factor > 1 else -1
+        low, high = 0, round(abs(factor - 1) * 100)
+        while high - low > 1:
+            middle = (low + high) // 2
+            shape = resize_shape(model, current, 1 + sign * middle / 100)
+            if self._check(entity, shape, shapes, baseline):
+                high = middle
+            else:
+                low = middle
+        return low or None
 
     def _write(
         self,

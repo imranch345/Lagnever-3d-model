@@ -474,7 +474,7 @@ function renderViewerToolbar() {
   $('vw-toolbar').replaceChildren(
     el('button', { class: 'primary', onclick: () => viewerAction('/sample') }, 'Generate a new thorax'),
     el('button', { onclick: () => viewerAction('/original') }, 'Back to the real subject'),
-    el('button', { onclick: () => viewerAction('/command', { text: 'make the left ventricle 15% larger' }) }, 'Make the left ventricle 15% larger'),
+    el('button', { onclick: () => viewerAction('/command', { text: 'make the left ventricle 10% smaller' }) }, 'Make the left ventricle 10% smaller'),
     el('button', { onclick: () => viewerAction('/reset') }, 'Reset the scene'),
     el('a', { href: '/viewer', target: '_blank', rel: 'noopener' }, 'Open in a new tab'),
     el('span', { id: 'vw-note', class: 'ink2', style: 'flex-basis:100%;font-size:13px' }));

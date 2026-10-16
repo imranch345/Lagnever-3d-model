@@ -95,6 +95,8 @@ class LanguageResult:
     source: str
     program: dict[str, Any] | None = None
     commands: list[str] = field(default_factory=list)
+    #: Engine operations applied (``CommandResponse.operation``), e.g. "reset_view".
+    operations: list[str] = field(default_factory=list)
 
 
 def translator_from_environment(ontology: AnatomyOntology) -> Translator | None:
@@ -133,7 +135,12 @@ class LanguageLayer:
                 message += (
                     f" Free-form requests need the language layer: set {ENABLE_VARIABLE}=claude."
                 )
-            return LanguageResult(ok=bool(response.ok), message=message, source="rules")
+            return LanguageResult(
+                ok=bool(response.ok),
+                message=message,
+                source="rules",
+                operations=[response.operation] if response.ok and response.operation else [],
+            )
 
         try:
             program = self.translator.translate(text)
@@ -146,6 +153,7 @@ class LanguageLayer:
 
         commands: list[str] = []
         messages: list[str] = []
+        operations: list[str] = []
         for step in program.steps:
             if step.op == "resize":
                 commands.append(f"resize {step.targets[0]} {step.value}%")
@@ -162,6 +170,8 @@ class LanguageLayer:
                 if not response.ok:
                     ok = False
                     break
+                if response.operation:
+                    operations.append(str(response.operation))
             if not ok:
                 break
         else:
@@ -172,6 +182,7 @@ class LanguageLayer:
             source="claude",
             program=program.to_dict(),
             commands=commands,
+            operations=operations,
         )
 
     def _resize_request(self, text: str, phrase: str, percent: float) -> LanguageResult:
