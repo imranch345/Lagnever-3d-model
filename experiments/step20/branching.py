@@ -11,7 +11,8 @@ separable:
   not the global RNG, so a branch seed cannot reach the weights.
 * ``build()`` was measured not to consume global RNG, and to return the same batch under a
   different global seed, so batch *contents* are a deterministic function of the scene group.
-* ``train_step`` was measured not to consume global RNG.
+* ``train_step`` was measured not to consume global RNG -- at 805, which is past the
+  teacher-forcing ramp. Inside the ramp it does (see ``state.py``); Step 21 found that.
 
 So changing the branch seed changes which scenes are grouped together and in what order, and
 nothing else. That is the intervention this step claims to make, and the claim is measured rather
