@@ -5,7 +5,7 @@ investor material. Every number points to where it comes from. The dated, comple
 including runs that failed, is [`LAB_NOTEBOOK.md`](LAB_NOTEBOOK.md). This page is updated
 whenever a headline result changes.
 
-*Last updated: 2026-10-16.*
+*Last updated: 2026-10-16, 13:10.*
 
 ## What the project is
 
@@ -52,7 +52,7 @@ signals.
 | P3 | Data is efficient to acquire. | 20 subjects for 32.6 MB of a 28.4 GB archive (HTTP byte ranges); 200 subjects later fetched the same way | `assets/fetch.py`, notebook 2026-10-15 and 2026-10-16 |
 | P4 | Automated quality gate. | 15 of 20 subjects accepted; each of the 5 rejections has a stated reason (field-of-view cut, missing structure) | `datasets/processed/level1/real/quality_report.json` |
 | P5 | An open-vocabulary language layer with a safety boundary. | Rules first; otherwise Claude emits a program restricted by a closed schema of operations and entity ids, validated before anything runs. Off by default; tested without network calls | ADR-L1-005, `language/` |
-| P6 | *In progress:* generated anatomy (Level 2a statistical shape models). | Registration on real left ventricles fits at 0.15–0.19 mm mean, in 5–9 s each; model build on ~200 subjects is next | `docs/LEVEL_2_PLAN.md`, `shapes/` |
+| P6 | **Generated anatomy from learned shape models** (Level 2a): statistical models of the four chambers, the myocardium and both lungs, learned from 131 real CTs, draw new plausible thoraxes. | Held-out reconstruction error: 1.1–2.1 mm for the chambers and myocardium, 5.1–6.3 mm for the lungs. That is 3.2–4.6× better than the mean-shape baseline on 26 subjects never seen in fitting. Registration fit has a median of 0.24–0.40 mm (chambers) and 1.1 mm (lungs). The first generated thorax passes the quality checks | `evidence/2026-10-16_generated_thorax_seed1.jpg`, `LAB_NOTEBOOK.md` 2026-10-16, `shapes/` |
 
 ## How the results are protected
 
@@ -90,8 +90,10 @@ These practices are part of the claim. They are why the numbers can be trusted.
   measurements, not clinical values, and have not been reviewed by a clinician.
 * The cardiac-cycle animation is semantic, a sequence of named phases. It is not a
   physiological simulation.
-* Level 2 (generated anatomy) is not yet demonstrated. Its plan and code exist and are tested
-  on synthetic shapes, but the real-data model has not been built.
+* Level 2a shape models are linear: they vary shape the way the training population did.
+  They cover five heart structures and the two lungs, not the vessels or the lobes. Lung
+  templates miss thin wedges and recesses (3–8% of the surface). The right-lung template
+  carries a topological handle from its reference subject.
 
 ## Evidence index
 
