@@ -469,3 +469,21 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Tests:** a refusal's offer passes, and one percent more does not. An existing overlap
   does not block a change that eases it. A typed reset matches the button. A sample carries
   its validity verdict.
+
+## 2026-10-16 (16:30) — Full test suite on PR #7
+
+- **Two environments** run the suite, so that every test has its dependencies. No new package
+  was downloaded, and the frozen research environment was not modified:
+  - **Product venv** (assets, shapes, language, viewer, dashboard, core): **607 passed**.
+  - **Research venv** (torch 2.14; Steps 7–20, whole-organ corpus), on this branch's code:
+    **556 passed** at first. The other 6, all Step 14, need a frozen Step 10 checkpoint that
+    lives only in the research checkout's run folder. With that one folder linked
+    read-only, **all 16 Step 14 tests pass**.
+  - **Total: 1169 tests, all passing.**
+- **Two real failures found and fixed** (`fed0003`).
+  - `test_datasets` still asserted the Step 4 state: nothing ever downloaded, and
+    processed/ text only. Level 1's approved CC BY 4.0 data broke both.
+  - The tests now enforce what the dataset rule actually requires:
+    - every raw source has a recorded licence, URL and attribution;
+    - binary files appear only in the derived level1/ and level2a/ folders, which carry
+      their provenance.
