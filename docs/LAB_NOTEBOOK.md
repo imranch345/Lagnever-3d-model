@@ -259,3 +259,22 @@ of the frozen protocol.
     - +30% beyond the training volumes is refused, and nothing is written.
     - A neighbour moved against the ventricle blocks it.
     - Groups, unknown names and changes over 30% are refused before any geometry work.
+
+## 2026-10-16 (11:02) — 200-subject quality report
+
+- **131 of 200 subjects usable** (66%). The same rule as Level 1 again chooses **s0029** as
+  the reference, out of 200 rather than 20.
+- **69 rejected.** A subject can have several reasons:
+
+  | reason | subjects | notes |
+  | --- | --- | --- |
+  | field of view cuts a lung or the heart | 57 | most often the right lung (54) and its lower lobe (53) |
+  | missing structures | 45 | mostly the trachea, pulmonary trunk and right upper lobe: scans that stop below the upper chest |
+  | in separate pieces | 22 | mostly the aorta (7), IVC (6) and right upper lobe (5) |
+
+  14 subjects fail on field of view alone and 30 on field of view plus missing structures.
+  The CT scans are not bad; they were acquired for other regions. TotalSegmentator is not a
+  thorax dataset, and the gate does what it should.
+- **Shape build started 11:02**, niced, on the 131 usable subjects. It uses the hardened
+  build, lung placement and single-piece templates from earlier today.
+- **Evidence:** `datasets/processed/level1/real/quality_report.json` (local data, not in git).
