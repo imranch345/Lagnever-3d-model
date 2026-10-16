@@ -394,7 +394,7 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Second fix.** The viewer wrote generated scenes to `real/samples/`, where the next quality
   run would have counted them as scans. They now go to `level2a/viewer_scenes/`.
 
-## 2026-10-16 (13:40) — A dashboard over the whole project
+## 2026-10-16 (13:36) — A dashboard over the whole project
 
 - **Asked for by the user:** "a frontend dashboard where everything is connected".
   `python -m dashboard.server` serves it on 127.0.0.1:8795, local only.
@@ -444,7 +444,7 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Action.** The viewer now samples at 0.5 SD, and each sample records its own validity
   verdict. Seed 11 at 0.5 SD passes both the quality and validity checks.
 
-## 2026-10-16 (15:00–15:40) — Resize on a real heart: a negative result, then a working design
+## 2026-10-16 (14:57–15:25) — Resize on a real heart: a negative result, then a working design
 
 - **Second machine restart at about 14:24.** Step 21 resumed at 14:57; point 200's branches
   05–07 rerun from their saved state.
@@ -470,7 +470,7 @@ data); code at `8fc2d04` + `f1bdcd4`.
   does not block a change that eases it. A typed reset matches the button. A sample carries
   its validity verdict.
 
-## 2026-10-16 (16:30) — Full test suite on PR #7
+## 2026-10-16 (16:14) — Full test suite on PR #7
 
 - **Two environments** run the suite, so that every test has its dependencies. No new package
   was downloaded, and the frozen research environment was not modified:
@@ -488,7 +488,7 @@ data); code at `8fc2d04` + `f1bdcd4`.
     - binary files appear only in the derived level1/ and level2a/ folders, which carry
       their provenance.
 
-## 2026-10-16 (17:30) — Which sampler: plausibility against novelty
+## 2026-10-16 (16:37) — Which sampler: plausibility against novelty
 
 - **Question.** Can generated thoraxes be both plausible and as varied as real people? So
   far, 0.5 SD passed every check but sat close to the training set, and 1 SD failed one
