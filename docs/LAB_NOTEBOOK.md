@@ -572,3 +572,16 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Housekeeping.** Free disk is down to 8.7 GB, from 40+ GB on 2026-10-12. Step 22 needs
   about 0.2 GB, so it is safe against its 2 GiB stop condition, but the machine is getting
   full.
+- **00:20, capture valid.** Seed 5 reproduces its frozen Step 16 trajectory exactly at **17 of
+  17** shared checkpoints (0–800), and its step-0 state differs from seed 9's.
+- **00:20, first launch failed, then fixed.**
+  - **Symptom.** Every continuation exited at once, refused by the runner's own
+    declared-run check.
+  - **Cause.** The check keyed runs by name alone, and `branch_05` exists at points 0, 400 and
+    800, so the point-800 entry shadowed point 0.
+  - **Why the tests missed it.** They had checked that a wrong run is refused, not that every
+    right run is accepted.
+  - **Fix** (`3ffb62f`). Whole runs are compared, with tests for all 32 declared runs.
+  - **Impact.** No continuation produced a result, and the capture is unaffected. Recorded in
+    `sweep.log` ("=== STOPPED ...", "=== RESUMED ...").
+- **00:21, continuations running.** 14 at most 3 at a time, about 4 h.
