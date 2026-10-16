@@ -122,16 +122,22 @@ def choose(qualities: Sequence[SubjectQuality]) -> SubjectQuality | None:
     return min(usable, key=lambda q: (len(q.soft), q.dropped_components, q.subject))
 
 
-def build_all(raw_root: Path, scenes: Path) -> dict[str, str]:
+def build_all(raw_root: Path, scenes: Path, *, skip_built: bool = False) -> dict[str, str]:
     """Build every subject under ``raw_root`` into ``scenes``; return build failures by subject.
 
     A subject that cannot be built is recorded with its error and is simply not usable; one
-    bad scan must not stop the others.
+    bad scan must not stop the others. With ``skip_built``, a subject whose manifest exists is
+    kept as it is: the manifest is written last, so its presence means the build finished.
+    This resumes an interrupted batch; it is only correct when the kept scenes were built by
+    the same code.
     """
     from assets.meshes import build_subject
 
     failures: dict[str, str] = {}
     for subject in sorted(p for p in raw_root.iterdir() if (p / "segmentations").is_dir()):
+        if skip_built and (scenes / subject.name / "manifest.json").is_file():
+            print(f"kept {subject.name}: already built", flush=True)
+            continue
         try:
             build_subject(subject, scenes / subject.name)
         except Exception as exc:  # noqa: BLE001 - recorded per subject, not swallowed
@@ -146,8 +152,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--scenes", type=Path, required=True)
     parser.add_argument("--build-from", type=Path, default=None,
                         help="raw subjects to build into --scenes first")
+    parser.add_argument("--skip-built", action="store_true",
+                        help="with --build-from, keep subjects whose manifest already exists")
     args = parser.parse_args(argv)
-    failures = build_all(args.build_from, args.scenes) if args.build_from else {}
+    failures = (
+        build_all(args.build_from, args.scenes, skip_built=args.skip_built)
+        if args.build_from
+        else {}
+    )
     qualities = [
         assess(json.loads(path.read_text(encoding="utf-8")))
         for path in sorted(args.scenes.glob("*/manifest.json"))
