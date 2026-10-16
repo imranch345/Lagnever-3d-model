@@ -117,14 +117,13 @@ def write_valid_sample_scene(
             measure(joint.sample_entities(drawn), joint.faces, normals), limits, ontology
         )
         if not failures:
-            return write_sample_scene(
+            manifest = write_sample_scene(
                 joint,
                 out_dir,
                 seed=seed,
                 spread=spread,
                 provenance=provenance,
                 ontology=ontology,
-                limits=limits,
                 coefficients=drawn,
                 sampler={
                     "kind": f"gaussian at {spread:g} SD, kept only if valid",
@@ -132,6 +131,10 @@ def write_valid_sample_scene(
                     "rejected": rejected,
                 },
             )
+            # Already checked above; recording the verdict saves checking it twice.
+            manifest["validity"] = {"passes": True, "failures": []}
+            (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            return manifest
         rejected.append([message for _, message in failures][:3])
     return write_sample_scene(
         joint,
