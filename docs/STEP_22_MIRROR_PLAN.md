@@ -218,3 +218,25 @@ with completed results kept, as in Step 21.
   controlled contrast of escaping against non-escaping training from one state.
 * **C′:** the non-using mode is not an initialisation property for seed 5. Reconsider whether
   Step 15's modes are attractors of the initialisation at all before designing anything else.
+
+---
+
+## Clarifications before any code
+
+*Added the same night, after reading the code the plan depends on, and before any Step 22
+code was written or run. Nothing above is changed.*
+
+1. **Seed 5's frozen trajectory was made at 4 threads.** Step 17's report records that Step
+   16's runs were launched at `OMP_NUM_THREADS=4`. So the bit-exact comparison of §7, check 2,
+   is possible at the frozen thread count.
+2. **The capture trains seed 5 to step 800 and saves states at 0, 400 and 800.**
+   - Step 0 is Arm 1's branch point. 400 and 800 are Stage 2's, if it runs, so Stage 2 needs
+     no second capture.
+   - The capture's own trajectory must reproduce frozen seed 5 exactly at every shared
+     checkpoint from 0 to 800. It is checked before any continuation starts, as in Step 21.
+3. **Each continuation is built with the seed of the weights it continues.**
+   - The trainer's validation loader and any other seed-derived object follow the
+     initialisation's seed.
+   - Only the training loader's generator is reseeded, with the run's loader seed. For
+     `cross_9w_5o` that means a seed-9 trainer, seed 9's step-0 state from Step 21, and
+     loader seed 5.

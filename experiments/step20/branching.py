@@ -72,12 +72,15 @@ WINDOW = (805, 900)
 WEIGHT = 3.0
 
 
-def _build(corpus_dir: Path) -> tuple[Any, Any, dict[int, int]]:
+def _build(corpus_dir: Path, seed: int = SEED) -> tuple[Any, Any, dict[int, int]]:
     """A trainer at the frozen configuration, and its recorder.
 
     The trainer's own loader is kept. A branch later reseeds *only* that loader's private
     generator, which is the narrowest possible intervention: no object is replaced, so there is
     nothing else that could differ between branches by construction.
+
+    ``seed`` is the run seed, seed 9 unless a later step says otherwise (Step 22 uses seed 5).
+    It must be the seed of the weights being continued.
     """
     domain = load_domain_config()
     ontology = load_ontology(
@@ -89,7 +92,7 @@ def _build(corpus_dir: Path) -> tuple[Any, Any, dict[int, int]]:
 
     config = replace(
         with_variant(
-            default_config("A3"), placement_target="global", hierarchy="spatial", seed=SEED
+            default_config("A3"), placement_target="global", hierarchy="spatial", seed=seed
         ),
         rotation_objective="chordal",
         rotation_loss_weight=WEIGHT,
@@ -188,13 +191,15 @@ def continue_run(
     out_dir: Path,
     branch: str,
     loader_seed: int | None,
+    seed: int = SEED,
 ) -> dict[str, Any]:
     """Continue from the saved state to the end of the budget.
 
     ``loader_seed=None`` restores the original stream position exactly -- the reference control.
     Any integer starts a fresh ordering from the branch point, which is the intervention.
+    ``seed`` is the run seed of the state being continued (seed 9 unless stated).
     """
-    trainer, recorder, positions = _build(corpus_dir)
+    trainer, recorder, positions = _build(corpus_dir, seed)
     restored = load_state(trainer=trainer, path=state_path)
     start = restored["step"]
     stream = ResumableStream(trainer.train_loader)
