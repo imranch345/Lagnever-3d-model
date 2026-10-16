@@ -278,3 +278,52 @@ of the frozen protocol.
 - **Shape build started 11:02**, niced, on the 131 usable subjects. It uses the hardened
   build, lung placement and single-piece templates from earlier today.
 - **Evidence:** `datasets/processed/level1/real/quality_report.json` (local data, not in git).
+
+## 2026-10-16 (11:44) — Step 21 Stage 1 complete: unanimous at 400, 600 and 700
+
+**Validity, all clean.**
+- Each reference reproduces frozen seed 9 exactly: 400 at 35/35, 600 at 31/31, 700 at 29/29
+  checkpoints.
+- One starting fingerprint per point, and 8 distinct orderings at every point.
+- Determinism replay (400, branch_00) identical at every checkpoint.
+- All 12 freeze manifests clean: 182 of 182 files.
+- The Stage 2 gate reports no problems.
+
+**Primary outcome** (escapes out of 8, with Step 20's 805 for comparison):
+
+| branch point | escaped | verdict | escape step, min–max (mean) | final validation rotation |
+| --- | --- | --- | --- | --- |
+| 400 | 8/8 | unanimous | 750–800 (787.5), timed to 50 steps* | 20.975° ± 0.009 |
+| 600 | 8/8 | unanimous | 835–865 (855.0) | 21.011° ± 0.032 |
+| 700 | 8/8 | unanimous | 820–855 (836.3) | 20.981° ± 0.018 |
+| 805 (Step 20) | 8/8 | unanimous | 830–840 | 20.988° ± 0.023 |
+
+\* These escapes fall before the dense 5-step window (805–900), so per §4 they are timed on
+the 50-step grid. Their spread is not comparable with the others'.
+
+**Predictions recorded before the run.**
+
+| prediction | result |
+| --- | --- |
+| 1. references reproduce | **confirmed** |
+| 2. 600 and 700 unanimous | **confirmed** |
+| 3. 400 unanimous, weakly | **confirmed**. 8/8 is consistent with any escape rate above about 0.69 (one-sided 95%), so "unanimous" means a high rate, not certainty |
+| 5. escape-step spread grows as the branch point moves earlier | **not cleanly**. Standard deviation is 8.7 steps at 600 and 12.4 at 700, both above 805's. 400's escapes are at 50-step resolution and cannot be compared |
+
+**Not anticipated in the plan.** Every branch from 400 escapes **earlier** than frozen seed 9
+itself (750–800 against 830–835). Ordering moves *when* the escape happens by 50 steps or more.
+It has not changed *whether* it happens from any point tested. Every escaped branch ends at
+the same rotation to within 0.03°.
+
+**What this licenses.**
+- Seed 9's escape survives every ordering tried from step 400 on.
+- The pattern including 805 is monotone, so outcome C (non-monotone) is ruled out for
+  400–805.
+- Per §6 this does **not** show that the state at 400 causes the escape.
+
+**Next, chosen by the preregistered table.** Stage 2a, branch points 200 and 0, 18 runs,
+started 11:44. Step 0 decides between A (fixed at initialisation) and B (entered during
+training).
+
+**Evidence:** `experiments/runs/step21/point_0{400,600,700}/` and `sweep.log` (PR #5 branch);
+the summary was computed with `experiments.step21.basin_entry.summarise`.
