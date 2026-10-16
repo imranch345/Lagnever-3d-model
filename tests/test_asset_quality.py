@@ -100,3 +100,20 @@ def test_build_all_records_a_broken_subject_and_builds_the_rest(tmp_path) -> Non
     failures = build_all(raw, tmp_path / "scenes")
     assert list(failures) == ["s0002"]
     assert (tmp_path / "scenes" / "s0001" / "manifest.json").is_file()
+
+
+def test_build_all_can_resume_without_rebuilding(tmp_path) -> None:
+    """With skip_built, a finished subject is kept untouched and only the rest are built."""
+    from assets.quality import build_all
+
+    raw = tmp_path / "raw"
+    write_phantom(raw, name="s0001")
+    write_phantom(raw, name="s0002")
+    scenes = tmp_path / "scenes"
+    build_all(raw, scenes)
+    kept = scenes / "s0001" / "manifest.json"
+    kept.write_text('{"marker": "kept"}')
+    (scenes / "s0002" / "manifest.json").unlink()
+    assert build_all(raw, scenes, skip_built=True) == {}
+    assert kept.read_text() == '{"marker": "kept"}'
+    assert (scenes / "s0002" / "manifest.json").is_file()

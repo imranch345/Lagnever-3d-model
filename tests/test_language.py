@@ -178,9 +178,11 @@ class TestCommands:
                 Step("reset"),
             )
         )
-        assert {s.op for s in program.steps} == set(OPERATIONS)
+        # resize is the one operation without an engine command (ADR-L2-001).
+        assert {s.op for s in program.steps} == set(OPERATIONS) - {"resize"}
         for command in to_commands(program):
             assert engine.execute(command).ok, command
+        assert to_commands(Program(steps=(Step("resize", ("heart.left_ventricle",), "+10"),))) == []
 
     def test_isolate_means_only_those(self, engine) -> None:
         """'isolate' becomes 'show only', and leaves exactly its targets visible."""
@@ -259,3 +261,89 @@ class TestRouting:
         assert translator_from_environment(thorax) is None
         monkeypatch.setenv(ENABLE_VARIABLE, "rules")
         assert translator_from_environment(thorax) is None
+
+
+class TestResize:
+    """'Make the left ventricle 20% larger': read by a rule, applied by a hook, kept in the AWR."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("make the left ventricle 20% larger", ("left ventricle", 20.0)),
+            ("Make the LV 10 percent smaller.", ("LV", -10.0)),
+            ("shrink the right atrium by 15%", ("right atrium", -15.0)),
+            ("enlarge the left lung 5%", ("left lung", 5.0)),
+            ("resize the myocardium by -10%", ("myocardium", -10.0)),
+            ("make the left ventricle transparent", None),
+            ("set the left ventricle opacity to 30%", None),
+        ],
+    )
+    def test_the_rule_reads_size_requests(self, text: str, expected: object) -> None:
+        """Direction from the words or the sign; anything else is not a resize."""
+        from language.layer import parse_resize
+
+        assert parse_resize(text) == expected
+
+    def test_a_resize_step_is_validated(self, thorax) -> None:
+        """One structure, a non-zero change within 30%, normalised with its sign."""
+
+        def step(targets: list[str], value: str) -> dict[str, Any]:
+            return {"steps": [{"op": "resize", "targets": targets, "value": value}]}
+
+        lv, rv = "heart.left_ventricle", "heart.right_ventricle"
+        assert validate_program(step([lv], "20"), thorax).steps[0].value == "+20"
+        for bad in (step([lv, rv], "10"), step([lv], "40"), step([lv], "0"), step([], "10")):
+            with pytest.raises(ProgramError):
+                validate_program(bad, thorax)
+
+    def test_the_awr_records_size_only_when_the_geometry_changed(self, engine) -> None:
+        """Cumulative scale on success; nothing recorded on a refusal or without a model."""
+        calls: list[tuple[str, float]] = []
+        answers = iter([(True, "grown"), (True, "grown again"), (False, "would overlap")])
+
+        def hook(entity: str, factor: float) -> tuple[bool, str]:
+            calls.append((entity, factor))
+            return next(answers)
+
+        layer = LanguageLayer(engine, resize=hook)
+
+        def scale() -> tuple[float, ...]:
+            return engine.scene.get("heart.left_ventricle").state.transform.scale
+
+        first = layer.execute("make the left ventricle 20% larger")
+        assert first.ok and first.source == "rules" and first.message == "grown"
+        assert first.commands == ["resize heart.left_ventricle +20%"]
+        assert calls == [("heart.left_ventricle", 1.2)]
+        layer.execute("make the LV 10% larger")
+        assert scale() == pytest.approx((1.32, 1.32, 1.32))
+        refused = layer.execute("enlarge the left ventricle by 10%")
+        assert not refused.ok and refused.message == "would overlap"
+        assert scale() == pytest.approx((1.32, 1.32, 1.32))
+        no_model = LanguageLayer(engine).execute("make the left ventricle 5% smaller")
+        assert not no_model.ok and "--model" in no_model.message
+
+    def test_groups_unknown_names_and_big_changes_are_refused(self, engine) -> None:
+        """One structure at a time, a real one, within the limit; the hook is never called."""
+        calls: list[str] = []
+        layer = LanguageLayer(engine, resize=lambda e, f: (calls.append(e) or True, "x"))
+        assert "group" in layer.execute("make the lungs 10% larger").message
+        assert not layer.execute("make the spleen 10% larger").ok
+        assert "30%" in layer.execute("make the left ventricle 50% larger").message
+        assert calls == []
+
+    def test_a_program_mixes_resize_with_engine_steps(self, engine) -> None:
+        """Claude's program: the resize goes to the hook, the rest to the engine, in order."""
+        translator = _ScriptedTranslator(
+            Program(
+                steps=(
+                    Step("resize", ("heart.left_ventricle",), "+20"),
+                    Step("hide", ("respiratory.lungs",)),
+                )
+            )
+        )
+        layer = LanguageLayer(engine, translator, resize=lambda e, f: (True, f"{e} x{f:g}"))
+        result = layer.execute("give me a bigger left ventricle and get the lungs out of the way")
+        assert result.ok and result.source == "claude"
+        assert result.commands == ["resize heart.left_ventricle +20%", "hide respiratory.lungs"]
+        assert "heart.left_ventricle x1.2" in result.message
+        assert not _visible(engine) & {"respiratory.left_lung", "respiratory.right_lung"}

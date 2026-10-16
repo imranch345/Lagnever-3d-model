@@ -98,6 +98,30 @@ it runs on a CPU. The code is in `shapes/`:
 The viewer can draw from a model with `--model`, and it keeps the scene's state when the
 geometry changes. Generated anatomy is not a measurement of anyone.
 
+Results on 131 real CTs are in **[docs/LEVEL_2A_REPORT.md](docs/LEVEL_2A_REPORT.md)**: on held-out
+subjects, the models beat the mean shape by 3.2–4.6×. One structure can be resized by a
+sentence, such as "make the left ventricle 20% larger", within its own shape model
+(ADR-L2-001).
+
+### The dashboard: everything in one place
+
+```bash
+python -m dashboard.server --scene datasets/processed/level1/real/s0029 \
+    --model datasets/processed/level2a/models/joint.npz --research ~/code/lagnav-3d
+```
+
+It runs on http://127.0.0.1:8795/, local only, and reads live from this machine every 15 s. It
+has six tabs:
+
+* **Overview:** jobs running now and headline results;
+* **Research:** Step 21's branch map and escape timing, live;
+* **Generated anatomy:** data funnel, held-out errors, validity;
+* **3D viewer:** the viewer itself, with generate, resize and commands;
+* **Evidence:** captioned screenshots;
+* **Notebook & docs:** the lab notebook, results, reports and ADRs.
+
+The code is in `dashboard/` and the tests in `tests/test_dashboard.py`.
+
 ### What Step 7 changed about how to read Step 6
 
 Step 6 reported that the typed graph encoder was not earning its parameters. **That
@@ -484,7 +508,8 @@ ontology/     Versioned ontology data (Heart Ontology v0.1; Thorax Ontology v0.1
 assets/       Level 1: label map, byte-range fetcher, mesh pipeline, quality report, phantom
 viewer/       Level 1: local server around the CommandEngine, and the three.js page
 language/     Level 1: free text to a closed AWR program (rule parser first, Claude if enabled)
-shapes/       Level 2a: alignment, correspondence, shape models, generated scenes
+shapes/       Level 2a: alignment, correspondence, shape models, validity, resize
+dashboard/    One local page over everything: research, Level 1/2a, viewer, evidence, docs
 configs/      Domain configuration, the (empty) model configuration, neural experiment configs
 experiments/  Runnable demonstrations, the pre-registered heart experiment, and the
               runners for Steps 7 to 20

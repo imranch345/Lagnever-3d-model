@@ -68,3 +68,11 @@ records five decisions:
 * attribution and license travel with every asset (ADR-L1-004).
 * free text reaches Claude only as a request for a closed AWR program, off by default and
   after the rule parser (ADR-L1-005).
+
+**Level 2a** (`docs/LEVEL_2_PLAN.md`): "make the left ventricle 20% larger" resizes one entity
+within its own shape model. The change is recorded in the AWR's existing transform scale.
+Only that entity changes, and a result that fails the calibrated validity checks is refused.
+The research parser and neural vocabulary stay untouched (ADR-L2-001).
+Generated thoraxes are drawn at 1 SD and kept only if they pass the validity checks: as novel
+as a new real person, and plausible by the checks. Sampling around training subjects was
+tested and rejected because it copies (ADR-L2-002).

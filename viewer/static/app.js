@@ -92,7 +92,9 @@ function applyState() {
     m.transparent = e.opacity < 0.999;
     m.depthWrite = !m.transparent;
     mesh.renderOrder = m.transparent ? 1 : 0;
-    mesh.visible = e.visible;
+    // drawn = the AWR's visibility, or the organ's other representation when the chosen one
+    // has no geometry in this scene (viewer/state.py).
+    mesh.visible = e.drawn;
   }
   $('lod').textContent =
     `Level of detail ${state.active_lod} · ${state.educational_level} · scene v${state.scene_version}`;
@@ -178,6 +180,7 @@ async function run(text) {
   }
   log(body.message, body.ok ? 'ok' : 'bad');
   state = body.state;
+  if (body.geometry_changed) await loadScene();
   applyState();
 }
 
@@ -207,9 +210,16 @@ reset.addEventListener('click', async () => {
   const body = await res.json();
   log(body.message, 'ok');
   state = body.state;
+  if (body.geometry_changed) await loadScene();
   applyState();
 });
 $('chips').append(reset);
+const grow = document.createElement('button');
+grow.type = 'button';
+grow.textContent = 'Make the left ventricle 10% smaller';
+grow.hidden = true;
+grow.addEventListener('click', () => run(grow.textContent));
+$('chips').append(grow);
 
 // Hover names a structure; a click explains it.
 const ray = new THREE.Raycaster();
@@ -253,6 +263,7 @@ function showHeader() {
     ` · ${c.attribution}`,
   );
   $('sampling').hidden = !state.sampling;
+  grow.hidden = !state.resizing;
 }
 
 // Load (or reload) the current scene's meshes. The AWR state is untouched: a new geometry is
@@ -321,7 +332,7 @@ function roleTargets(roles) {
     if (!kids.has(e.parent)) kids.set(e.parent, []);
     kids.get(e.parent).push(e.id);
   });
-  const drawn = (id) => meshes.has(id) && ents.get(id)?.visible;
+  const drawn = (id) => meshes.has(id) && ents.get(id)?.drawn;
   const spread = (id, role) => {
     if (drawn(id)) { if (!out.has(id)) out.set(id, role); return; }
     (kids.get(id) || []).forEach((c) => spread(c, role));

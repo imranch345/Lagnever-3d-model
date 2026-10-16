@@ -5,7 +5,8 @@ For every usable subject (``quality_report.json``) and every requested entity:
 1. align the subject to the reference subject (the one Level 1 chose) by its heart shell;
 2. deform the reference's template onto the subject's entity;
 3. keep the registration only if its surface fit is within ``max_fit_mm``, else record it as
-   excluded with its error -- counted and reported, never silently dropped.
+   excluded with its error -- counted and reported, never silently dropped. A subject whose
+   loading, alignment or registration raises is excluded the same way, with the error.
 
 Registrations are cached per subject and entity, so an interrupted build resumes and a rebuild
 with new model settings costs nothing.
@@ -33,7 +34,16 @@ from typing import Any
 import numpy as np
 
 from shapes.joint import fit_joint
-from shapes.register import fit_error, load_scene, make_template, register, rigid_to
+from shapes.register import (
+    DEFAULT_STEPS,
+    LOOSE_STEPS,
+    fit_error,
+    load_scene,
+    make_template,
+    register,
+    rigid_to,
+    topology,
+)
 from shapes.ssm import ShapeModel, fit
 
 __all__ = ["DEFAULT_ENTITIES", "build_models", "split_subjects"]
@@ -48,6 +58,14 @@ DEFAULT_ENTITIES: tuple[str, ...] = (
     "respiratory.left_lung",
     "respiratory.right_lung",
 )
+
+#: Entities registered with a finer template and the looser stages (``shapes.register``). The
+#: lungs are ten times the chambers' size and vary more; with the chambers' settings 4 of 6
+#: probe lungs missed the fit threshold.
+LARGE_ORGANS: dict[str, int] = {
+    "respiratory.left_lung": 4000,
+    "respiratory.right_lung": 4000,
+}
 
 
 def split_subjects(
@@ -105,7 +123,9 @@ def build_models(
     reference_id = str(quality["chosen"])
     usable = sorted(q["subject"] for q in quality["subjects"] if q["usable"])
     reference = load_scene(scenes_root / reference_id)
-    templates = {e: make_template(reference[e], template_faces) for e in entities}
+    faces_for = {e: LARGE_ORGANS.get(e, template_faces) for e in entities}
+    steps_for = {e: LOOSE_STEPS if e in LARGE_ORGANS else DEFAULT_STEPS for e in entities}
+    templates = {e: make_template(reference[e], faces_for[e]) for e in entities}
     cache_dir = out_dir / "registrations"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,22 +136,36 @@ def build_models(
         cached = {e: cache_dir / f"{subject}__{e}.npz" for e in entities}
         scene = None
         matrix = np.eye(4)
+        rigid_cost = 0.0
         for entity in entities:
-            if cached[entity].is_file():
-                stored = np.load(cached[entity])
-                vertices, error = stored["vertices"], json.loads(str(stored["error"]))
-            else:
-                if scene is None:
-                    scene = load_scene(scenes_root / subject)
-                    matrix, _ = rigid_to(reference["heart"], scene["heart"], seed=seed)
-                if entity not in scene:
-                    excluded[entity][subject] = "no mesh"
-                    continue
-                target = scene[entity].copy()
-                target.apply_transform(matrix)
-                vertices = register(templates[entity], target)
-                error = fit_error(vertices, templates[entity].faces, target)
-                np.savez_compressed(cached[entity], vertices=vertices, error=json.dumps(error))
+            try:
+                if cached[entity].is_file():
+                    stored = np.load(cached[entity])
+                    vertices, error = stored["vertices"], json.loads(str(stored["error"]))
+                else:
+                    if scene is None:
+                        # The scene counts as loaded only once it is aligned, so a failed
+                        # alignment can never leave later entities registered unaligned.
+                        loaded = load_scene(scenes_root / subject)
+                        matrix, rigid_cost = rigid_to(
+                            reference["heart"], loaded["heart"], seed=seed
+                        )
+                        scene = loaded
+                    if entity not in scene:
+                        excluded[entity][subject] = "no mesh"
+                        continue
+                    target = scene[entity].copy()
+                    target.apply_transform(matrix)
+                    vertices = register(templates[entity], target, steps=steps_for[entity])
+                    error = fit_error(vertices, templates[entity].faces, target)
+                    error["rigid_cost"] = rigid_cost
+                    np.savez_compressed(cached[entity], vertices=vertices, error=json.dumps(error))
+            except Exception as failure:
+                # One bad subject must not end a build of hundreds. It is recorded, not
+                # cached, so a rebuild tries it again.
+                excluded[entity][subject] = f"failed: {type(failure).__name__}: {failure}"
+                print(f"failed {subject} {entity}: {failure!r}", flush=True)
+                continue
             fits[entity][subject] = error
             if error["mean_from_target"] > max_fit_mm:
                 excluded[entity][subject] = f"fit {error['mean_from_target']:.2f} mm"
@@ -146,7 +180,8 @@ def build_models(
         "train": train_ids,
         "held_out": held_ids,
         "settings": {
-            "template_faces": template_faces,
+            "template_faces": faces_for,
+            "loose_steps": sorted(e for e in entities if e in LARGE_ORGANS),
             "max_fit_mm": max_fit_mm,
             "variance": variance,
             "holdout_fraction": holdout_fraction,
@@ -158,6 +193,7 @@ def build_models(
         train = {s: shapes[entity][s] for s in train_ids if s in shapes[entity]}
         held = {s: shapes[entity][s] for s in held_ids if s in shapes[entity]}
         entry: dict[str, Any] = {
+            "template": topology(templates[entity]),
             "registered": len(fits[entity]),
             "excluded": excluded[entity],
             "fit_mean_mm": round(

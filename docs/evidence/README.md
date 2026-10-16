@@ -1,0 +1,23 @@
+# Evidence
+
+Screenshots of the system working, captured from the running viewer in the browser, each
+with what it shows and how to reproduce it. New captures are added here as results arrive.
+
+Real-CT images show meshes derived from the **TotalSegmentator dataset v1.0** (Wasserthal J.
+et al., Zenodo 10.5281/zenodo.6802614, **CC BY 4.0**). They are research data, not validated,
+and not for clinical use. Phantom images show simple shapes, not anatomy.
+
+| file | date | shows | produced by |
+| --- | --- | --- | --- |
+| `2026-10-15_phantom_viewer_first_light.jpg` | 2026-10-15 | First end-to-end run of the viewer, on the synthetic phantom. 17 entity meshes loaded by entity id, banner and credits drawn, "no geometry yet" tags for valves. | commit `d392d92`; `python -m viewer.server --scene datasets/processed/level1/phantom` |
+| `2026-10-15_phantom_cardiac_cycle_ejection.png` | 2026-10-15 | The engine's semantic cardiac cycle played in the viewer, 3× slower, during ventricular ejection: ventricles contract, the aorta glows. | commit `6d3c593`; "Animate blood flow" |
+| `2026-10-15_real_ct_s0029_heart_and_lungs.jpg` | 2026-10-15 | **First real-CT scene.** Subject s0029 in anterior view: right lung's three lobes (screen left), left lung's two, trachea, heart and vessels. | commits `a01548f`, `0d36a9c`; `python -m viewer.server --scene datasets/processed/level1/real/s0029` |
+| `2026-10-15_real_ct_s0029_lungs_hidden.jpg` | 2026-10-15 | The same scene after the typed command "hide the lungs": aortic arch, pulmonary trunk, chambers, IVC. The command hid 5 lobes, and the lung shells were already hidden at LOD 1. | as above |
+| `2026-10-15_real_ct_s0029_phone_layout.jpg` | 2026-10-15 | The viewer at phone width (375 px): the scene re-frames and the controls stack below it. | commit `0d36a9c` |
+| `2026-10-16_real_ct_s0029_lod0_organ_shells.png` | 2026-10-16 | Level of detail 0 on real CT: heart shell, two lung shells and the trachea, with no lobes. The engine draws an organ as its shell or as its parts, never both. | commit `5823afa`; "show less detail" |
+| `2026-10-16_lung_registration_probe.md` | 2026-10-16 | Lungs need placement, a finer template and looser stages to fit within 2 mm (4 of 6 failed before, 0 of 6 after). Numbers and script. | `shapes.register.placement`, `LOOSE_STEPS` |
+| `2026-10-16_generated_thorax_seed1.jpg` | 2026-10-16 | **First generated heart and lungs.** Seed 1 of the Level 2a joint model (17 modes, 98 training subjects from 131 real CTs). It passes the quality checks. The banner says it is generated anatomy and not a measurement of anyone. The lungs are drawn as shells because a generated scene has no lobes (the `drawn` fallback). | `python -m viewer.server --scene datasets/processed/level1/real/s0029 --model datasets/processed/level2a/models/joint.npz`; "Generate a new thorax" |
+| `2026-10-16_dashboard_step21_live.jpg` | 2026-10-16 | The project dashboard's Research tab, live during Step 21 Stage 2. Each dot is one branch: 400, 600 and 700 unanimous; 200 running (3 of 9); 0 waiting. Every reference reproduces seed 9. | `python -m dashboard.server --scene datasets/processed/level1/real/s0029 --model datasets/processed/level2a/models/joint.npz` |
+| `2026-10-16_resize_s0029_lv_before.jpg` | 2026-10-16 | Real subject s0029, "show only the left ventricle": the CT-derived LV before any resize. | dashboard viewer; `show only the left ventricle` |
+| `2026-10-16_resize_s0029_lv_minus15.jpg` | 2026-10-16 | The same view after "make the left ventricle 15% smaller": the LV's own shape model gives −15.0% size and −38.7% volume, 0.6 mm from plain scaling. It is smoother because it is the model's template surface. | `make the left ventricle 15% smaller` |
+| `2026-10-16_resize_s0029_lv_plus15_refused.jpg` | 2026-10-16 | "Make the left ventricle 15% larger" refused. The reply lists the overlaps with the myocardium and left atrium, and offers the largest increase that passes: +2%. | `make the left ventricle 15% larger` |

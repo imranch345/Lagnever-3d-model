@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -112,24 +113,50 @@ def test_unknown_schema_version_is_refused(ontology: AnatomyOntology, tmp_path: 
         load_sample(path)
 
 
-def test_no_licensed_assets_are_acquired() -> None:
-    """Nothing has been downloaded: the raw directory stays empty."""
-    contents = [p.name for p in (datasets_dir() / "raw").iterdir() if p.name != ".gitkeep"]
-    assert contents == []
+#: Real sources allowed in datasets/raw, each with the file that records its licence, source
+#: and attribution (README rule 1, ADR-L1-004). Level 1 acquired a TotalSegmentator subset with
+#: the user's approval on 2026-10-15 and 2026-10-16.
+LICENSED_SOURCES = {"totalsegmentator_v1": "assets/labels/totalsegmentator_v1.json"}
+#: Generated stand-ins that need no licence.
+GENERATED_SOURCES = {"phantom"}
+#: Derived Level 1 and 2 folders. They hold binary meshes and models, each carrying its
+#: source's attribution.
+DERIVED_ASSET_DIRS = {"level1", "level2a"}
 
 
-def test_processed_holds_only_generated_text_data() -> None:
-    """Step 6 generates a synthetic corpus here. It must be text, and it must be ignored by git.
+def test_every_raw_asset_has_a_recorded_licence() -> None:
+    """Rule 1, enforced: nothing sits in raw/ without a licence, a source and an attribution."""
+    for entry in (datasets_dir() / "raw").iterdir():
+        if entry.name == ".gitkeep" or entry.name in GENERATED_SOURCES:
+            continue
+        assert entry.name in LICENSED_SOURCES, f"unlicensed asset in datasets/raw: {entry.name}"
+        record = json.loads((repo_root() / LICENSED_SOURCES[entry.name]).read_text("utf-8"))
+        source = record["source"]
+        assert source["license"] and source["url"] and source["attribution"], entry.name
 
-    Stricter than the pre-Step-6 emptiness check it replaces: the corpus is allowed,
-    binary blobs and licensed assets are still not.
+
+def test_processed_holds_text_or_attributed_derived_assets() -> None:
+    """Text everywhere, except the derived Level 1/2 folders, which say where they came from.
+
+    This replaces the Step 6 rule, which allowed the synthetic corpus and nothing binary.
+    Level 1 added meshes from CC BY 4.0 data, and Level 2a added shape models fitted to
+    them. Both live only in their own folders, carry the attribution, and stay out of git.
     """
     allowed = {".json", ".jsonl", ".gitkeep"}
-    for path in (datasets_dir() / "processed").rglob("*"):
+    processed = datasets_dir() / "processed"
+    for path in processed.rglob("*"):
         if path.is_dir():
+            continue
+        if path.relative_to(processed).parts[0] in DERIVED_ASSET_DIRS:
             continue
         suffix = path.suffix or path.name
         assert suffix in allowed, f"unexpected file in datasets/processed: {path.name}"
+    provenance = processed / "level2a" / "provenance.json"
+    if provenance.is_file():
+        assert json.loads(provenance.read_text("utf-8"))["license"]
+    for manifest in sorted((processed / "level1").glob("*/*/manifest.json"))[:20]:
+        source = json.loads(manifest.read_text("utf-8")).get("source", {})
+        assert source.get("license") or source.get("dataset", "").startswith("Lagnav"), manifest
 
     ignore = (repo_root() / ".gitignore").read_text(encoding="utf-8")
     assert "datasets/processed/*" in ignore
