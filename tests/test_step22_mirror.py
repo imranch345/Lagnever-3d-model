@@ -251,6 +251,27 @@ class TestIntegrity:
         assert set(outcome["classes"].values()) == {"stuck"}
 
 
+def test_every_declared_run_is_accepted_and_nothing_else() -> None:
+    """The first launch refused all step-0 runs: point 800 shadowed point 0. Never again."""
+    runs = mirror.plan_runs((0, *mirror.STAGE_TWO_POINTS))
+    assert len(runs) == 14 + 18
+    assert all(mirror.declared(r) for r in runs)
+    for name, point in (("branch_05", 0), ("branch_05", 400), ("reference", 800)):
+        match = next(r for r in runs if r["name"] == name and r["point"] == point)
+        assert mirror.declared(match)
+    wrong_point = {**dict(runs[0]), "point": 600}
+    wrong_weights = {**dict(runs[1]), "weights": 9}
+    assert not mirror.declared(wrong_point) and not mirror.declared(wrong_weights)
+    swap_later = {"name": "cross_5w_9o", "point": 400, "weights": 5, "loader": 9, "replay": False}
+    assert not mirror.declared(swap_later)
+
+
+def test_the_cli_round_trips_a_declared_run(monkeypatch) -> None:
+    """What the runner sends on the command line is exactly what the check accepts."""
+    for run in mirror.plan_runs((0, *mirror.STAGE_TWO_POINTS)):
+        assert mirror.declared(mirror.Run(json.loads(json.dumps(dict(run)))))
+
+
 def test_the_cli_refuses_a_run_the_plan_does_not_declare(monkeypatch, tmp_path) -> None:
     """'continue' only runs what plan_runs declares, exactly."""
     monkeypatch.setenv("OMP_NUM_THREADS", "4")

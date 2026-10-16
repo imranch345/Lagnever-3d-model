@@ -54,6 +54,7 @@ __all__ = [
     "STAGE_TWO_POINTS",
     "Run",
     "arm_one",
+    "declared",
     "integrity",
     "plan_runs",
     "stage_two_points",
@@ -101,6 +102,17 @@ def plan_runs(points: Sequence[int] = (0,), *, arm_two: bool = True) -> list[Run
     if arm_two and 0 in points:
         runs.extend(_run(name, 0, w, o) for name, (w, o) in ARM_TWO.items())
     return runs
+
+
+def declared(run: Mapping[str, Any]) -> bool:
+    """Whether ``run`` is exactly one the plan declares, at its own point.
+
+    Keyed by point and name together: ``branch_05`` exists at 0, 400 and 800, and a check keyed
+    by name alone let the last of them shadow the others, which refused every step-0 run on
+    the first launch (2026-10-17).
+    """
+    runs = plan_runs((0, *STAGE_TWO_POINTS))
+    return any(dict(r) == dict(run) for r in runs)
 
 
 def _file_name(run: Mapping[str, Any]) -> str:
@@ -376,8 +388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if report["valid"] else 1
     if args.mode == "continue":
         run = Run(json.loads(args.run))
-        known = {_file_name(r): r for r in plan_runs((0, *STAGE_TWO_POINTS))}
-        if _file_name(run) not in known or known[_file_name(run)] != run:
+        if not declared(run):
             raise SystemExit(f"not a run the plan declares: {args.run}")
         print(f"written to {continue_one(corpus_dir=args.corpus, out_dir=args.out, run=run)}")
         return 0
