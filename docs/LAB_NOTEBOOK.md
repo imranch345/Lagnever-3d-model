@@ -544,3 +544,31 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Evidence:** `docs/STEP_21_BASIN_ENTRY_REPORT.md` and
   `experiments/runs/step21/summary.json`. The README research table and RESULTS R7 are
   updated.
+
+## 2026-10-16 (23:50) to 2026-10-17 (00:10) — Step 22 preregistered, coded, tested and started
+
+- **Question.** Step 21 fixed seed 9's escape at initialisation. Is the *non*-escape of seed 5
+  fixed too? And is a seed's outcome its weights or its data order, the question Step 15 left
+  open?
+- **Preregistration** (`docs/STEP_22_MIRROR_PLAN.md`, PR #10), written before any code:
+  - **Arm 1:** seed 5 from step 0, under the eight orderings that all escaped from seed 9's
+    step 0;
+  - **Arm 2:** a crossed swap (seed 5's weights with seed 9's batch order, and the reverse),
+    with identity controls;
+  - **decision rule:** A′ (both modes fixed), B′ (order rescues seed 5), C′ (the original
+    order was the accident) or invalid;
+  - **four predictions**, including "Arm 1 = none, all stuck".
+- **Checked before code.** Step 16 ran at 4 threads, so seed 5's frozen trajectory can be
+  reproduced bit-exactly. The data loader is seeded with the run seed, so loader seed *s*
+  from step 0 is run *s*'s batch order. The model's own random draws follow the weights'
+  seed: the swap is batch order only.
+- **Code.** Steps 20 and 21 gained a seed parameter that defaults to 9, so nothing earlier
+  changed. Their tests pass unchanged. `experiments/step22/mirror.py` and 24 tests, including
+  a test that the swap changes the first batch to the other seed's and keeps the weights.
+- **Full suite: 1232 passed** (5 skipped: asset tests without their extra). The frozen
+  checksums were 182/182 before the start.
+- **Started at 00:10:** capture of seed 5 to step 800, then 14 continuations, then the
+  Stage 2 gate.
+- **Housekeeping.** Free disk is down to 8.7 GB, from 40+ GB on 2026-10-12. Step 22 needs
+  about 0.2 GB, so it is safe against its 2 GiB stop condition, but the machine is getting
+  full.
