@@ -121,9 +121,9 @@ FROZEN_SEED9 = Path("experiments/runs/step18/trajectory_seed9_onset.json")
 STEP20_CAPTURE = Path("experiments/runs/step20/capture.json")
 
 
-def state_path(out_dir: Path, point: int) -> Path:
-    """Where the capture saves the state at ``point``."""
-    return out_dir / f"state_seed{SEED}_step{point}.pt"
+def state_path(out_dir: Path, point: int, seed: int = SEED) -> Path:
+    """Where the capture saves the state at ``point`` (seed 9 unless a later step says)."""
+    return out_dir / f"state_seed{seed}_step{point}.pt"
 
 
 def point_dir(out_dir: Path, point: int) -> Path:
@@ -135,7 +135,12 @@ def point_dir(out_dir: Path, point: int) -> Path:
 # Capture
 # ----------------------------------------------------------------------
 def capture_states(
-    trainer: Any, *, points: Iterable[int], out_dir: Path, recorder: Any = None
+    trainer: Any,
+    *,
+    points: Iterable[int],
+    out_dir: Path,
+    recorder: Any = None,
+    seed: int = SEED,
 ) -> dict[int, dict[str, Any]]:
     """Train from step 0 to the last point, saving a continuable state at each point.
 
@@ -158,8 +163,8 @@ def capture_states(
                 trainer=trainer,
                 stream=stream,
                 step=step,
-                path=state_path(out_dir, step),
-                label=f"seed{SEED}_step{step}",
+                path=state_path(out_dir, step, seed),
+                label=f"seed{seed}_step{step}",
             )
         if step < last:
             trainer.train_step(next(iterator), step)
