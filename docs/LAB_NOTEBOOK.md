@@ -585,3 +585,10 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Impact.** No continuation produced a result, and the capture is unaffected. Recorded in
     `sweep.log` ("=== STOPPED ...", "=== RESUMED ...").
 - **00:21, continuations running.** 14 at most 3 at a time, about 4 h.
+- **2026-10-17, interruption.**
+  - **What stopped.** Runs stopped at about 02:53. Branches 05–07 were near step 830 of 1200.
+  - **Restart.** The machine restarted at about 15:14 and was on battery: 7% at 21:20, with
+    an "early" battery warning.
+  - **Kept.** Six results completed before the stop: the reference and branches 00–04.
+  - **Resume.** A watcher resumes the chain only once the machine is on AC power. Interrupted
+    runs restart from the saved step-0 state, as in Step 21, and completed results are kept.
