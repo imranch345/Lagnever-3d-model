@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -136,12 +136,18 @@ def resize_code(
     codes: torch.Tensor | None = None,
     keep: Sequence[int] = (),
     keep_weight: float = 1.0,
+    grow_with: Mapping[int, float] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """A code whose structure ``index`` has ``factor``³ its starting soft volume, if it can.
 
     Structures in ``keep`` are held at no less than their starting soft volume (in the same
     box), by ``keep_weight`` · Σ min(0, V/V₀ − 1)². A growing chamber then pushes its
     neighbours aside instead of eating into them.
+
+    ``grow_with`` maps other structures to an exponent: each is steered to ``factor`` to that
+    power of its starting soft volume. A wall that stretches over a growing chamber and keeps
+    its thickness grows with its surface, so the myocardium takes exponent 2 when the LV
+    takes 3.
     """
     device = start.device
     points = torch.from_numpy(_box_points(labels, grid, index, margin_mm, spacing_mm)).to(device)
@@ -182,6 +188,9 @@ def resize_code(
         volume = float(volumes[index])
         weights = torch.zeros(config.n_classes, device=device)
         weights[index] = 2.0 * (volume / target - 1.0) / target
+        for j, power in (grow_with or {}).items():
+            goal = before_all[j] * factor**power
+            weights[j] = 2.0 * (volumes[j] / goal - 1.0) / goal
         for j in keep:
             ratio = volumes[j] / before_all[j]
             if ratio < 1.0:
@@ -240,6 +249,7 @@ def _attempt(
     index = classes.index(entity) + 1
     settings = dict(options)
     keep = [classes.index(e) + 1 for e in settings.pop("keep", [])]
+    grow_with = {classes.index(e) + 1: power for e, power in settings.pop("grow_with", {}).items()}
     code, soft = resize_code(
         field,
         start,
@@ -249,6 +259,7 @@ def _attempt(
         start_labels,
         codes=codes,
         keep=keep,
+        grow_with=grow_with,
         **settings,
     )
     thorax = decode_thorax(field, code, grid, classes)
@@ -370,6 +381,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--keep", nargs="*", default=[], help="structures held at no less than their volume"
     )
     parser.add_argument("--keep-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--grow-with",
+        nargs="*",
+        default=[],
+        help="entity:exponent, e.g. heart.myocardium:2 (a wall keeping its thickness)",
+    )
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -387,6 +404,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "plausibility": args.plausibility,
             "keep": args.keep,
             "keep_weight": args.keep_weight,
+            "grow_with": {
+                item.rsplit(":", 1)[0]: float(item.rsplit(":", 1)[1]) for item in args.grow_with
+            },
         },
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
