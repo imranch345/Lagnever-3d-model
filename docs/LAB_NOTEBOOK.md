@@ -948,3 +948,28 @@ data); code at `8fc2d04` + `f1bdcd4`.
   soft volume, with a prior toward the start. With part fields, only that part's code moves.
   Checks and bisection work as in Level 2a. The first real test is s0029's LV at +15%,
   running now.
+
+## 2026-10-18 (20:55) — Level 2b resize, single code: the LV grows, the lungs come along
+
+- **s0029, LV, run 3's field (one code), linear-size requests as in Level 2a:**
+
+  | asked | LV reached (size / volume) | verdict |
+  | --- | --- | --- |
+  | +15% | +14.4% / +49.7% | right lung 4248 mL, above the training maximum of 3908 |
+  | +7% | +6.8% / +21.7% | right lung 3996 mL |
+  | +5% | +4.9% / +15.5% | right lung 3944 mL |
+  | +4% | +3.9% / +12.1% | right lung 3912 mL |
+  | **+3%** | **+2.9% / +9.0%** | **passes** (Level 2a: +2%) |
+
+- **What works:** optimising the code reaches the asked size. The soft volume came within
+  2% of target, and the LV itself stayed within its range (202 mL against a maximum of 245).
+- **What fails:** the whole thorax grows with the LV. At +15%:
+  - right lung 3765 → 4248 mL and left lung 3272 → 3441 mL;
+  - RV 171 → 207 mL, myocardium 149 → 171 mL, LA 91 → 103 mL.
+
+  In the training population, a large heart comes with a large body, and one code ties
+  them. s0029's right lung already sits near the training maximum, so it leaves the range
+  first.
+- **Consequence.** This is the case part fields were built for: with a heart code and a
+  lung code, growing the LV cannot touch the lungs. An interim test on run 5 (parts, step
+  14,000) is running now.

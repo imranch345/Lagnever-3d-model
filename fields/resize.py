@@ -20,6 +20,10 @@ thoraxes say they move together. No point can belong to two structures, whatever
 - closed meshes;
 - one label per point.
 
+As in Level 2a, the limits are "no worse than real anatomy, nor than this subject already
+is" (``baseline_limits``). A thorax that starts slightly outside a limit can still be resized,
+so long as the change does not take it further out.
+
 The largest whole-percent change that passes is found by bisection, as in Level 2a, and the
 volumes reached are reported.
 
@@ -45,7 +49,7 @@ from fields.evaluate import Grid, load_checkpoint
 from fields.generate import decode_thorax, judge
 from fields.model import Field, pick_device
 
-__all__ = ["ResizeResult", "largest_change", "resize_code", "soft_volume"]
+__all__ = ["ResizeResult", "baseline_limits", "largest_change", "resize_code", "soft_volume"]
 
 
 def soft_volume(
@@ -132,6 +136,16 @@ def resize_code(
     return final, {"soft_before_ml": before, "soft_target_ml": target, "soft_after_ml": after}
 
 
+def baseline_limits(limits: dict[str, Any], start: dict[str, Any]) -> dict[str, Any]:
+    """Each limit widened to admit the starting thorax's own value, and no further."""
+    volume = {
+        e: (min(low, start["volume_ml"][e]), max(high, start["volume_ml"][e]))
+        for e, (low, high) in limits["volume_ml"].items()
+    }
+    stray = {e: max(limit, start["stray"][e]) for e, limit in limits["stray"].items()}
+    return {"volume_ml": volume, "stray": stray}
+
+
 @dataclass
 class ResizeResult:
     """One attempt: what was asked, whether it passes, and what it reached."""
@@ -205,6 +219,7 @@ def largest_change(
     begin = decode_thorax(field, start, grid, classes)
     start_volumes = dict(begin.measures["volume_ml"])
     start_failures = judge(begin.measures, limits["volume_ml"], limits["stray"], ontology)
+    limits = baseline_limits(limits, begin.measures)
     options = options or {}
 
     def attempt(p: int) -> ResizeResult:
@@ -249,8 +264,10 @@ def largest_change(
         "asked_percent": percent,
         "start": {
             "volume_ml": {e: round(v, 1) for e, v in start_volumes.items()},
+            "stray": {e: round(v, 4) for e, v in begin.measures["stray"].items()},
             "failures": [f"{k}: {m}" for k, m in start_failures],
         },
+        "limits_used": limits,
         "largest_passing": None if best is None else best.__dict__,
         "attempts": [t.__dict__ for t in tried],
         "options": options,

@@ -510,3 +510,13 @@ class TestResize:
         assert soft["soft_after_ml"] > 1.15 * soft["soft_before_ml"], soft
         if parts:
             assert torch.equal(code[:, 8:], start[:, 8:]), "the other part's code must not move"
+
+    def test_limits_admit_the_start_and_no_further(self) -> None:
+        """A start outside a limit widens it to the start's own value, never beyond."""
+        from fields.resize import baseline_limits
+
+        limits = {"volume_ml": {"lv": (60.0, 240.0)}, "stray": {"lv": 0.02}}
+        inside = baseline_limits(limits, {"volume_ml": {"lv": 130.0}, "stray": {"lv": 0.01}})
+        assert inside == limits
+        outside = baseline_limits(limits, {"volume_ml": {"lv": 250.0}, "stray": {"lv": 0.10}})
+        assert outside == {"volume_ml": {"lv": (60.0, 250.0)}, "stray": {"lv": 0.10}}
