@@ -696,3 +696,33 @@ data); code at `8fc2d04` + `f1bdcd4`.
     as Level 1 does.
   - **First full prototype.** 105 training subjects, 4000 steps, started 08:16, about 1.6
     steps/s on MPS. Evaluation on the 26 held-out subjects follows automatically.
+
+## 2026-10-18 (09:10) — Level 2b, first full prototype: behind Level 2a, and why
+
+- **Run.** 105 training subjects, 4000 steps on the Mac's M2 GPU in 43 minutes. Probe
+  accuracy plateaued near 69% from about step 2000.
+- **Held-out (26 subjects).** Symmetric mean surface distance to the real meshes, mm, 2b
+  against 2a scored by the same rule:
+
+  | structure | 2b | 2a |
+  | --- | --- | --- |
+  | LV | 1.42 | 0.89 |
+  | myocardium | 1.35 | 0.94 |
+  | LA | 2.10 | 1.39 |
+  | RA | 2.36 | 1.60 |
+  | RV | 2.28 | 1.24 |
+  | left lung | 6.87 | 3.80 |
+  | right lung | 7.36 | 4.71 |
+
+  **The first prototype is 1.5–2× worse than Level 2a.**
+- **Diagnosis, measured:**
+  - **Underfitting is the cause.** The model reproduces some *training* subjects badly, for
+    example s0024 with RV 9.1 mm and lungs around 10 mm. Each subject was seen only about 300
+    times.
+  - **Held-out fitting is not the bottleneck.** 1500 fitting steps instead of 300 change
+    little.
+  - **Fragments do not drive the distance.** The largest piece alone scores about the same.
+    Decoded lungs do come in many pieces, though (up to 57), which generation must clean.
+- **Consequence.** The recipe is right, and the scale is not. This is M2's purpose: far longer
+  training on a rented GPU. On the Mac, 50k steps would take about 9 hours; on a rented RTX
+  4090, roughly 30–45 minutes. The user is asked to set up the GPU account.
