@@ -11,7 +11,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 2.83 (04:44–07:34 UTC) | ~1.00 (estimate; billing figure to replace it) | M2 | VM `lagnav-2b-m2`: benchmark and five training runs; deleted when the user paused | **~1.00** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.43 (14:05–14:31 UTC) | ~0.15 (estimate) | M2 | second session: runs 4 and 5 resumed; **preempted** by Google at 14:31, VM deleted by its termination action | **~1.15** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.43 (14:36–16:02 UTC) | ~0.50 (estimate) | M2 | third session: run 4 finished, run 5 to step 28000, run 6 started; **preempted** at 16:02 | **~1.65** |
-| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | running since 16:04 UTC | pending | M2 | fourth session, within the user's spot choice ("may be preempted again; resumes each time"): runs 5 and 6 | pending |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 1.47 (16:04–17:32 UTC) | ~0.50 (estimate) | M2 | fourth session: runs 5 and 6 finished; VM deleted | **~2.15** |
 
 ## Sessions
 
@@ -57,3 +57,10 @@ provider's own billing figures. A cap is a hard stop.
 - **Fourth VM** created at 16:04 UTC in us-central1-a, after us-east1-b/c/d had no capacity.
   It is covered by the user's spot choice, whose stated terms were "may be preempted again;
   resumes each time". Spend stays far under the M2 cap: about $1.65 so far, against $50.
+- **Fourth session finished.** Runs 5 and 6 completed. Every run was pulled to the Mac and
+  run 6's checkpoint checked before the VM was deleted at 17:32 UTC; no lagnav instance or
+  disk remains.
+  - **Bug in the launcher:** `ssh` inside a `while read` loop consumed the run list, so run 6
+    did not start until 16:18. Fixed with `ssh -n`.
+  - **Day total:** about 6.2 VM-hours across four spot sessions, two of them preempted, for
+    an estimated **~$2.15**. M2's cap is $50.
