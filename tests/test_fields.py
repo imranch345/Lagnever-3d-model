@@ -373,3 +373,60 @@ class TestEvaluation:
         fitted = fit_code(model, held["points"], held["labels"], steps=150, batch=2048)
         assert loss(fitted) < loss(torch.zeros_like(fitted))
         assert all(torch.equal(before[k], v) for k, v in model.state_dict().items())
+
+
+class TestGeneration:
+    """fields.generate: the code Gaussian, decoding with cleanup, and the checks."""
+
+    def test_the_code_gaussian_matches_the_codes_and_handles_few_subjects(self) -> None:
+        """Draws centre on the codes' mean; fewer subjects than dimensions keeps S − 1 axes."""
+        from fields.generate import CodeGaussian
+
+        codes = np.random.default_rng(0).normal(size=(10, 32)) * np.linspace(0.1, 2, 32)
+        gaussian = CodeGaussian.fit(codes)
+        assert gaussian.axes.shape == (9, 32)
+        draws = np.stack([gaussian.draw(seed) for seed in range(2000)])
+        assert np.allclose(draws.mean(0), codes.mean(0), atol=0.15)
+        assert np.array_equal(gaussian.draw(7), gaussian.draw(7))
+        assert np.abs(gaussian.draw(1, spread=0.0) - codes.mean(0)).max() < 1e-12
+
+    def test_decoding_measures_and_cleans_strays(self) -> None:
+        """A field's labels decode to volumes, stray shares and one label per point."""
+        from fields.evaluate import Grid
+        from fields.generate import decode_thorax
+        from fields.model import FieldConfig, LabelField
+
+        torch.manual_seed(0)
+        field = LabelField(FieldConfig(n_classes=3, hidden=32, layers=4, latent_dim=4))
+        grid = Grid([-40, -40, -40], [40, 40, 40], 4.0)
+        thorax = decode_thorax(field, torch.randn(1, 4), grid, ["a", "b"])
+        measured = thorax.measures
+        assert measured["points_claimed_twice"] == 0
+        for entity in ("a", "b"):
+            if measured["pieces"][entity] > 1:
+                assert measured["stray"][entity] > 0
+            assert measured["volume_ml"][entity] == pytest.approx(
+                (thorax.volume == ["a", "b"].index(entity) + 1).sum() * 64 / 1000
+            )
+
+    def test_judge_names_each_failure(self) -> None:
+        """Volume out of range, too much stray, an open mesh and a missing structure all fail."""
+        from awr.ontology import load_ontology
+        from fields.generate import judge
+
+        ontology = load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+        lungs = ("respiratory.left_lung", "respiratory.right_lung")
+        measured = {
+            "points_claimed_twice": 0,
+            "volume_ml": {lungs[0]: 900.0, lungs[1]: 2500.0},
+            "stray": {lungs[0]: 0.2, lungs[1]: 0.0},
+            "closed": {lungs[0]: True, lungs[1]: False},
+            "centroids": {lungs[0]: [80.0, 0, 0], lungs[1]: [-80.0, 0, 0]},
+        }
+        limits = {lungs[0]: (1000.0, 4000.0), lungs[1]: (1000.0, 4000.0)}
+        kinds = [k for k, _ in judge(measured, limits, {lungs[0]: 0.05, lungs[1]: 0.05}, ontology)]
+        assert kinds == ["volume", "stray", "closed"]
+        measured["centroids"] = {lungs[0]: [-80.0, 0, 0], lungs[1]: [80.0, 0, 0]}
+        assert "sides" in [
+            k for k, _ in judge(measured, limits, {lungs[0]: 1, lungs[1]: 1}, ontology)
+        ]

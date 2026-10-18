@@ -9,6 +9,7 @@ provider's own billing figures. A cap is a hard stop.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | – | – | – | – | 0.00 | – | nothing spent yet | **0.00** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 2.83 (04:44–07:34 UTC) | ~1.00 (estimate; billing figure to replace it) | M2 | VM `lagnav-2b-m2`: benchmark and five training runs; deleted when the user paused | **~1.00** |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | running since 14:05 UTC | pending | M2 | VM `lagnav-2b-m2` (second session): resume runs 4 and 5, then run 6 | pending |
 
 ## Sessions
 
@@ -32,3 +33,12 @@ provider's own billing figures. A cap is a hard stop.
   no disk named lagnav remain in the project.
 - **Estimate:** 2.83 h × ~$0.25–0.45/h spot, plus disk and IP, comes to about $0.75–1.35.
   It will be replaced by Google's billing figure once it posts. M2 cap: $50.
+
+### 2026-10-18 · M2 second GPU session · `lagnav-2b-m2`
+
+- **Created** at 14:05 UTC, after the user's explicit yes to the plan and its estimate:
+  about 3 h and $0.75–1.35.
+- **Zone:** spot L4 capacity was exhausted in us-central1-a, -b and -c, so the VM was created
+  in us-east1-b, where the project's L4 quota also applies.
+- **Same machine and safeguards as the first session:** 6 h auto-delete, no service account
+  or scopes, instance-only SSH key, and checkpoints pulled to the Mac every 4 minutes.
