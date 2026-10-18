@@ -147,3 +147,63 @@ class TestTheField:
         assert checkpoint["field_config"]["n_classes"] == 3
         codes = checkpoint["codes"]
         assert torch.cdist(codes, codes).max() > 0, "subjects need distinct codes"
+
+
+class TestEvaluation:
+    """fields.evaluate: grids, meshes from labels, surface distance, held-out fitting."""
+
+    def test_grid_covers_its_bounds(self) -> None:
+        """Shape from extent and spacing; first and last points at the bounds."""
+        from fields.evaluate import Grid
+
+        grid = Grid([0, 0, 0], [10, 20, 30], 5.0)
+        points = grid.points()
+        assert grid.shape == (3, 5, 7) and len(points) == 3 * 5 * 7
+        assert np.allclose(points[0], [0, 0, 0]) and np.allclose(points[-1], [10, 20, 30])
+
+    def test_meshes_and_distances_from_a_labelled_ball(self) -> None:
+        """A labelled ball meshes to a closed surface; distance to itself 0, to a shift ~ shift."""
+        from fields.evaluate import Grid, label_meshes, surface_distance
+
+        grid = Grid([-30, -30, -30], [30, 30, 30], 1.0)
+        points = grid.points()
+        volume = (np.linalg.norm(points, axis=1) < 20).astype(np.uint8).reshape(grid.shape)
+        meshes = label_meshes(volume, grid, ["ball"])
+        ball = meshes["ball"]
+        assert abs(ball.volume / (4 / 3 * np.pi * 20**3) - 1) < 0.05
+        moved = ball.copy()
+        moved.apply_translation([2.0, 0, 0])
+        assert surface_distance(ball, ball) < 0.2
+        assert 0.8 < surface_distance(ball, moved) < 2.2
+
+    def test_a_held_out_subject_is_fitted_with_the_network_frozen(self, tmp_path) -> None:
+        """Fitting a new code lowers the loss, and the network's weights do not move."""
+        from torch.nn import functional
+
+        from fields.evaluate import fit_code, load_checkpoint
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data", n_subjects=5)
+        config = TrainConfig(steps=300, subjects_per_step=4, points_per_subject=2048, seed=0)
+        field = FieldConfig(hidden=64, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        train(
+            data_dir,
+            tmp_path / "run",
+            config,
+            field,
+            device="cpu",
+            subjects=["t0", "t1", "t2", "t3"],
+        )
+        model, _ = load_checkpoint(tmp_path / "run" / "checkpoint.pt", torch.device("cpu"))
+        before = {k: v.clone() for k, v in model.state_dict().items()}
+        held = np.load(data_dir / "points" / "t4.npz")
+        points = torch.from_numpy(held["points"]).unsqueeze(0)
+        truth = torch.from_numpy(held["labels"].astype(np.int64))
+
+        def loss(code: torch.Tensor) -> float:
+            return float(functional.cross_entropy(model(points, code)[0], truth))
+
+        fitted = fit_code(model, held["points"], held["labels"], steps=150, batch=2048)
+        assert loss(fitted) < loss(torch.zeros_like(fitted))
+        assert all(torch.equal(before[k], v) for k, v in model.state_dict().items())
