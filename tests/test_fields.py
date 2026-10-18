@@ -423,6 +423,8 @@ class TestGeneration:
         assert np.allclose(draws.mean(0), codes.mean(0), atol=0.15)
         assert np.array_equal(gaussian.draw(7), gaussian.draw(7))
         assert np.abs(gaussian.draw(1, spread=0.0) - codes.mean(0)).max() < 1e-12
+        leading = CodeGaussian.fit(codes, variance=0.5)
+        assert 1 <= len(leading.axes) < len(gaussian.axes)
 
     def test_decoding_measures_and_cleans_strays(self) -> None:
         """A field's labels decode to volumes, stray shares and one label per point."""

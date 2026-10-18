@@ -105,13 +105,20 @@ class CodeGaussian:
     axes: FloatArray
 
     @classmethod
-    def fit(cls, codes: npt.ArrayLike) -> CodeGaussian:
-        """From training codes (S, D). Axes with no spread are dropped (S − 1 < D is fine)."""
+    def fit(cls, codes: npt.ArrayLike, variance: float = 1.0) -> CodeGaussian:
+        """From training codes (S, D). Axes with no spread are dropped (S − 1 < D is fine).
+
+        With ``variance`` below 1, only the leading axes that explain that share of the
+        variance are kept. The weakest axes, estimated from few subjects, are left out.
+        """
         codes = np.asarray(codes, dtype=np.float64)
         centred = codes - codes.mean(axis=0)
         _, singular, vt = np.linalg.svd(centred, full_matrices=False)
         sd = singular / np.sqrt(max(len(codes) - 1, 1))
         keep = sd > 1e-6 * sd.max()
+        if variance < 1.0:
+            explained = np.cumsum(sd**2) / np.sum(sd**2)
+            keep &= np.arange(len(sd)) <= int(np.searchsorted(explained, variance))
         return cls(mean=codes.mean(axis=0), axes=sd[keep, None] * vt[keep])
 
     def draw(self, seed: int, spread: float = 1.0, clip: float = CLIP) -> FloatArray:
@@ -300,8 +307,14 @@ def generate(
     spacing_mm: float = 2.0,
     device: str | None = None,
     raw_root: Path | None = None,
+    real_stray_path: Path | None = None,
+    variance: float = 1.0,
 ) -> dict[str, Any]:
     """Draw, decode, judge and measure novelty; with the limits and the real baseline.
+
+    ``real_stray_path`` reuses real-anatomy stray limits computed before on the same grid
+    (``real_stray.json``). ``calibration=0`` skips the training decodes (no model-based
+    limits and no control). ``variance`` is passed to ``CodeGaussian.fit``.
 
     With ``raw_root`` (the CT label volumes), stray limits come from real anatomy
     (``real_stray``); the model-based limits are still recorded beside them.
@@ -316,7 +329,7 @@ def generate(
     held_out = list((manifest.get("split") or {}).get("held_out", []))
     ontology = load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
     codes = checkpoint["codes"].numpy().astype(np.float64)
-    gaussian = CodeGaussian.fit(codes)
+    gaussian = CodeGaussian.fit(codes, variance)
     training = np.concatenate(
         [np.load(data_dir / "points" / f"{s}.npz")["points"][::20] for s in train[:20]]
     )
@@ -338,13 +351,27 @@ def generate(
     }
     calibrated = train if calibration is None else train[:calibration]
     own = [decode_thorax(field, as_code(codes[train.index(s)]), grid, classes) for s in calibrated]
-    model_stray = {e: max(t.measures["stray"][e] for t in own) + MARGIN for e in classes}
+    model_stray = (
+        {e: max(t.measures["stray"][e] for t in own) + MARGIN for e in classes} if own else None
+    )
     stray_limits = model_stray
     stray_from = f"{len(own)} training subjects' own codes, plus {MARGIN:.0%}"
-    if raw_root is not None:
+    if real_stray_path is not None:
+        cached = json.loads(real_stray_path.read_text(encoding="utf-8"))
+        if cached["grid"] != {
+            "low": grid.low.tolist(),
+            "spacing_mm": grid.spacing,
+            "shape": list(grid.shape),
+        }:
+            raise ValueError(f"{real_stray_path} was computed on another grid")
+        stray_limits = cached["limits"]
+        stray_from = f"{real_stray_path.name}: CT labels on this grid, plus {cached['margin']:.0%}"
+    elif raw_root is not None:
         shares = real_stray(raw_root, stats, train, grid, classes)
         stray_limits = {e: max(v) + MARGIN for e, v in shares.items()}
         stray_from = f"{len(train)} training subjects' CT labels on this grid, plus {MARGIN:.0%}"
+    if stray_limits is None:
+        raise ValueError("no stray limits: calibrate on training decodes or give real ones")
     print(f"limits from {len(own)} training decodes in {time.time() - started:.0f} s", flush=True)
 
     reference = Reference(scenes_root, train, stats, classes)
@@ -390,9 +417,12 @@ def generate(
             "stray_model": model_stray,
         },
         "control": {
-            "training_decodes_passing": sum(not c for c in control) / len(control),
+            "training_decodes_passing": (
+                sum(not c for c in control) / len(control) if control else None
+            ),
             "failures": [[f"{k}: {m}" for k, m in c] for c in control if c],
         },
+        "variance": variance,
         "baseline": {
             "novelty_mm_median": round(
                 float(np.median([b["novelty_mm"] for b in baseline.values()])), 3
@@ -565,6 +595,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--device", default=None)
     parser.add_argument("--raw", type=Path, default=None, help="CT labels: real stray limits")
+    parser.add_argument("--real-stray", type=Path, default=None, help="cached real_stray.json")
+    parser.add_argument("--variance", type=float, default=1.0, help="code axes kept")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     report = generate(
@@ -578,12 +610,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         spacing_mm=args.spacing,
         device=args.device,
         raw_root=args.raw,
+        real_stray_path=args.real_stray,
+        variance=args.variance,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report["summary"], indent=2))
     print(f"real-person novelty, median: {report['baseline']['novelty_mm_median']} mm")
-    print(f"training decodes passing: {report['control']['training_decodes_passing']:.0%}")
+    passing = report["control"]["training_decodes_passing"]
+    print("training decodes passing: " + ("not run" if passing is None else f"{passing:.0%}"))
     return 0
 
 
