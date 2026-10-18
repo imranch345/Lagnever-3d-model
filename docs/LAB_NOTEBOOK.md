@@ -973,3 +973,27 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Consequence.** This is the case part fields were built for: with a heart code and a
   lung code, growing the LV cannot touch the lungs. An interim test on run 5 (parts, step
   14,000) is running now.
+
+## 2026-10-18 (21:45) — Level 2b M2, run 4: a larger code helps the lungs
+
+- **Run 4 (`m2-h512-focus-z128`): run 2 with a 128-number code instead of 64.** It finished
+  across two preempted VMs, resumed exactly. Final training accuracy is 0.921.
+- **Held-out, 26 subjects, after cleanup, mean / median mm:**
+
+  | structure | run 2 (z64) | run 4 (z128) | run 3 (z64, prior 1e-2) | Level 2a |
+  | --- | --- | --- | --- | --- |
+  | left lung | 3.25 / 2.48 | **2.98 / 2.25** | 3.35 / 2.65 | 3.80 / 3.58 |
+  | right lung | 3.44 / 2.91 | **3.09 / 2.25** | 3.68 / 2.79 | 4.71 / 4.05 |
+  | RA | 2.14 / 1.90 | **1.92 / 1.59** | 2.14 / 1.70 | 1.60 / 1.43 |
+  | RV | 1.83 / 1.67 | 1.78 / 1.63 | 1.86 / **1.51** | 1.24 / 1.20 |
+  | LA | 2.10 / 1.89 | 2.06 / 1.88 | **1.87 / 1.65** | 1.39 / 1.25 |
+  | LV | 1.32 / 1.22 | 1.35 / 1.17 | **1.29 / 1.11** | 0.89 / 0.82 |
+  | myocardium | 1.33 / 1.22 | 1.33 / 1.18 | **1.26 / 1.11** | 0.94 / 0.90 |
+
+- **Reading:**
+  - A larger code gives the best lungs so far, with both medians at 2.25 mm against Level
+    2a's 3.58 and 4.05.
+  - The compact-code prior gives the best heart.
+  - The two levers help different structures. The part field with a prior (run 6) gives
+    each part its own 64-number code, 128 in all, and the prior. It is the natural
+    combination.
