@@ -1038,3 +1038,45 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Pending:**
   - run 6 (parts with code prior 1e-2) on the same yardstick;
   - generation and the LV +15% resize for both runs.
+- **Run 5, generation** (50 samples at 1 SD, unfiltered, limits calibrated on its own 105
+  training decodes):
+  - **90% valid (45/50)**, against run 3's 94% and Level 2a's 78%;
+  - **novelty 4.45 mm, against 4.70 mm for a new real person (95%)**, closer to real than
+    run 3's 91%;
+  - **0 points claimed twice;**
+  - **failures:** three thoraxes with lungs above the training maximum (one at 5218 mL), two
+    with heart stray islands (LA 14.5% and 3.8%), and one myocardium mesh not closed;
+  - **control:** 94% of training decodes pass.
+- **Run 5, resize, s0029 LV +15%** (prior 1.0, 120 steps):
+  - **passes every check**;
+  - **the lungs did not move:** 3214 → 3203 mL and 3704 → 3700 mL;
+  - **but the LV reached only +6.6% size (+21.2% volume).** The soft volume stopped at
+    163 mL against a 205 mL target. The heart's own code did not get there within the
+    prior. This is still 3× Level 2a's +2%, but below the +15% target.
+  - **Reporting rule:** the figure that counts is what was reached, not what was asked.
+  - A retry with a weaker prior (0.1) and 300 steps is running.
+
+## 2026-10-19 (01:10) — Level 2b M2, run 6: part fields with compact codes, the best heart
+
+- **Run 6 (`m2-parts-h384-prior`): run 5 with the code prior raised to 1e-2.** Final
+  training accuracy 0.912; code norm 1.09, against 6.6 for run 5.
+- **Held-out, 26 subjects, after cleanup, mean / median mm (raw in brackets):**
+
+  | structure | Level 2a | run 5 | **run 6** | run 6 better than 2a | than run 5 |
+  | --- | --- | --- | --- | --- | --- |
+  | LV | 0.89 / 0.82 | 0.72 / 0.65 | **0.64 / 0.57** (0.64 / 0.57) | 24 / 26 | 22 / 26 |
+  | myocardium | 0.94 / 0.90 | 0.78 / 0.73 | **0.69 / 0.62** (0.71 / 0.62) | 24 / 26 | 23 / 26 |
+  | RV | 1.24 / 1.20 | 0.96 / 0.87 | **0.86 / 0.80** (0.96 / 0.80) | 26 / 26 | 22 / 26 |
+  | LA | 1.39 / 1.25 | 1.01 / 0.99 | **0.92 / 0.89** (0.92 / 0.91) | 26 / 26 | 18 / 26 |
+  | RA | 1.60 / 1.43 | 1.22 / 1.16 | **1.19 / 1.10** (1.36 / 1.10) | 21 / 26 | 10 / 26 |
+  | left lung | 3.80 / 3.58 | **3.22 / 2.39** | 3.55 / 2.56 (3.62 / 2.59) | 21 / 26 | 8 / 26 |
+  | right lung | 4.71 / 4.05 | 3.72 / 2.59 | 3.46 / 2.86 (3.57 / 2.83) | 23 / 26 | 16 / 26 |
+
+- **Reading:**
+  - Compact codes help the part field's heart as they helped the single field's. The heart
+    is now 25–30% better than Level 2a, with the LV median at 0.57 mm against a yardstick
+    floor of 0.35–0.47 mm.
+  - The field is also cleaner: raw and cleaned scores nearly agree. The RV's raw mean is
+    0.96 mm against run 5's 2.37.
+  - Lungs are on a par with run 5, and both beat Level 2a.
+- **Run 6 is the candidate product model,** pending its generation and resize results.
