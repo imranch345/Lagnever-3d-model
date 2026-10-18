@@ -997,3 +997,44 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - The two levers help different structures. The part field with a prior (run 6) gives
     each part its own 64-number code, 128 in all, and the prior. It is the natural
     combination.
+
+## 2026-10-18 (23:25) — Level 2b M2, run 5: part fields beat Level 2a on every structure
+
+- **Run 5 (`m2-parts-h384`):**
+  - one 64-number code and a hidden-384 trunk for the heart's five structures, and the same
+    for the two lungs;
+  - one softmax over all classes;
+  - heart focus 0.5, code prior 1e-4, 40,000 steps across three spot VMs (two preempted),
+    resumed exactly each time;
+  - final training accuracy 0.929, the highest of any run.
+- **Checked before reading:**
+  - no held-out subject is among the 105 training subjects;
+  - the 26 subjects, the grid and the fit (300 steps, unweighted) are identical to every
+    earlier evaluation.
+- **Held-out, 26 subjects, surface distance to the real Level 1 meshes in mm, after cleanup
+  (raw in brackets):**
+
+  | structure | Level 2a mean / median | **run 5 mean / median** | run 5 better in |
+  | --- | --- | --- | --- |
+  | LV | 0.89 / 0.82 | **0.72 / 0.65** (raw 0.81 / 0.68) | 23 / 26 |
+  | myocardium | 0.94 / 0.90 | **0.78 / 0.73** (0.82 / 0.73) | 21 / 26 |
+  | RV | 1.24 / 1.20 | **0.96 / 0.87** (2.37 / 1.64) | 25 / 26 |
+  | LA | 1.39 / 1.25 | **1.01 / 0.99** (1.02 / 1.00) | 23 / 26 |
+  | RA | 1.60 / 1.43 | **1.22 / 1.16** (1.43 / 1.19) | 23 / 26 |
+  | left lung | 3.80 / 3.58 | **3.22 / 2.39** (3.72 / 2.46) | 23 / 26 |
+  | right lung | 4.71 / 4.05 | **3.72 / 2.59** (3.95 / 2.59) | 21 / 26 |
+
+- **This meets the plan's fit target:** chambers no worse than Level 2a, lungs better.
+  Run 5 does better than that: every structure beats Level 2a on mean and median, and on
+  most subjects.
+  - **Cause, as diagnosed:** the single code tied heart and lungs together, and weighted
+    fitting traded one against the other. Splitting the code by part removes that coupling.
+    Heart medians fell from 1.1–1.9 mm (runs 1–4) to 0.65–1.16 mm.
+  - **Raw vs cleaned:** cleanup matters for the RV (raw mean 2.37 mm from stray islands;
+    median 2 pieces) and the lungs (median 3 pieces). It is part of the product pipeline
+    and is reported beside the raw figures.
+  - **Worst cases:** the heart's worst subjects are no worse than Level 2a's. The left lung
+    has one bad subject at 14.75 mm, against Level 2a's worst of 8.25 mm.
+- **Pending:**
+  - run 6 (parts with code prior 1e-2) on the same yardstick;
+  - generation and the LV +15% resize for both runs.
