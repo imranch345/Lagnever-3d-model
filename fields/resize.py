@@ -127,13 +127,16 @@ def resize_code(
     if plausibility > 0:
         if codes is None:
             raise ValueError("plausibility needs the training codes")
-        sub = codes.to(device)[:, moving].double()
+        # In double on the CPU (Apple's MPS has no float64), then moved to the device.
+        sub = codes.detach().cpu()[:, moving.cpu()].double()
         mean = sub.mean(dim=0)
         centred = sub - mean
         covariance = centred.T @ centred / max(len(sub) - 1, 1)
-        covariance += 1e-6 * covariance.diagonal().mean() * torch.eye(len(mean), device=device)
-        precision = torch.linalg.inv(covariance).float()
-        mean = mean.float()
+        covariance += (
+            1e-6 * covariance.diagonal().mean() * torch.eye(len(mean), dtype=torch.float64)
+        )
+        precision = torch.linalg.inv(covariance).float().to(device)
+        mean = mean.float().to(device)
     delta = torch.zeros_like(start, requires_grad=True)
     optimizer = torch.optim.Adam([delta], lr=lr)
     volume = before
