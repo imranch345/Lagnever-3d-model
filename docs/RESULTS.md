@@ -85,10 +85,17 @@ These practices are part of the claim. They are why the numbers can be trusted.
 
 ## Resources used
 
-* **Compute.** Everything so far has run on one laptop CPU. No GPU, no cloud spend.
+* **Compute.**
+  - Research and Levels 1–2a ran on one laptop.
+  - Level 2b trains on rented NVIDIA L4 GPUs (Google Cloud, spot). Spend so far is about
+    $1.65 of a $700 budget, every session logged in
+    [`LEVEL_2B_SPEND.md`](LEVEL_2B_SPEND.md).
+  - A GPU step runs about 21× faster than on the laptop.
 * **Data.** Public, openly licensed CT segmentations. No patient data was collected.
-* **Paid services.** None so far. The Claude language path needs an API key and has not been
-  run against the live API.
+* **Paid services.** The Claude language path (`claude-opus-5-5`) runs with the user's own
+  API key, kept in a private file and never printed. Its first live test gave 11 of 11
+  requests the intended result, including Hinglish ("dil ke left ventricle ko 10% chhota
+  karo") and refusals for absent anatomy (notebook, 2026-10-18).
 
 ## Limitations (stated plainly)
 
