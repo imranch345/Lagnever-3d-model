@@ -88,6 +88,40 @@ class TestPoints:
         assert overlaps >= 0
 
 
+class TestChest:
+    """Stage 2 data: fourteen chest classes, vessels cropped to the lungs as in Level 1."""
+
+    def test_vessels_are_cropped_to_the_lungs_extent(self, phantom) -> None:
+        """Aorta and IVC voxels lie within the lungs' slices; the crop removed some of them."""
+        from assets.meshes import read_mask
+        from fields import data
+
+        raw_root, _ = phantom
+        labels, _, overlaps = data.label_volume(raw_root / "p0", data.CHEST)
+        assert labels.max() <= len(data.CHEST) and overlaps >= 0
+        lobes = [data.CHEST.index(c) + 1 for c in data.CHEST if "lobe" in c]
+        lung_slices = np.flatnonzero(np.isin(labels, lobes).any(axis=(0, 1)))
+        for vessel, raw_name in (
+            ("heart.aorta", "aorta"),
+            ("heart.inferior_vena_cava", "inferior_vena_cava"),
+        ):
+            kept = np.flatnonzero((labels == data.CHEST.index(vessel) + 1).any(axis=(0, 1)))
+            assert len(kept) and lung_slices.min() <= kept.min() and kept.max() <= lung_slices.max()
+            raw, _ = read_mask(raw_root / "p0" / "segmentations" / f"{raw_name}.nii.gz")
+            assert np.flatnonzero(raw.any(axis=(0, 1))).min() < lung_slices.min(), (
+                "the phantom's vessels run below the lungs, so the crop must remove something"
+            )
+
+    def test_parts_can_group_several_prefixes(self, tmp_path) -> None:
+        """'a|b' is one part; the first matching part wins."""
+        from fields.train import part_indices
+
+        (tmp_path / "manifest.json").write_text(
+            json.dumps({"classes": ["nothing", "heart.aorta", "heart.lv", "lung.x", "heart.ivc"]})
+        )
+        assert part_indices(tmp_path, ["heart.aorta|heart.ivc", "heart.", "lung."]) == (0, 1, 2, 0)
+
+
 def _spheres(tmp_path: Path, n_subjects: int = 4) -> Path:
     """Points in a cube labelled by two spheres whose radii differ per subject."""
     rng = np.random.default_rng(0)

@@ -2,8 +2,12 @@
 
 For each subject, the label masks of the modelled structures become one label volume:
 - 0 is "nothing";
-- 1..K are the structures in ``CLASSES`` order;
-- a lung is the union of its lobes, as in Level 1.
+- 1..K are the structures in class order (``PRESETS``: ``heart-lungs``, the first seven,
+  or ``chest``, fourteen with the great vessels, the lobes and the trachea);
+- a lung is the union of its lobes, as in Level 1;
+- a structure with a crop is cropped as Level 1 crops it. The aorta and the IVC keep only
+  the slices within the lungs' extent, so a vessel's length does not depend on how far the
+  scan happened to reach.
 
 Points are drawn from that volume:
 
@@ -41,12 +45,14 @@ import numpy.typing as npt
 from scipy import ndimage  # type: ignore[import-untyped]
 
 from assets.labels import DEFAULT_LABEL_MAP, LabelMap, load_label_map
-from assets.meshes import RAS_TO_VIEWER, read_mask
+from assets.meshes import RAS_TO_VIEWER, _crop_to_extent, read_mask
 from shapes.build import DEFAULT_ENTITIES
 from shapes.register import load_scene, rigid_to
 
 __all__ = [
+    "CHEST",
     "CLASSES",
+    "PRESETS",
     "Frame",
     "build",
     "frame_for",
@@ -58,6 +64,24 @@ __all__ = [
 FloatArray = npt.NDArray[np.float64]
 #: The structures, in label order 1..K; 0 is "nothing". Level 2a's seven, for a direct comparison.
 CLASSES: tuple[str, ...] = DEFAULT_ENTITIES
+#: Stage 2 of the roadmap: the whole chest Level 1 builds, lungs by lobe.
+CHEST: tuple[str, ...] = (
+    "heart.left_atrium",
+    "heart.left_ventricle",
+    "heart.right_atrium",
+    "heart.right_ventricle",
+    "heart.myocardium",
+    "heart.aorta",
+    "heart.pulmonary_trunk",
+    "heart.inferior_vena_cava",
+    "respiratory.lung_upper_lobe_left",
+    "respiratory.lung_lower_lobe_left",
+    "respiratory.lung_upper_lobe_right",
+    "respiratory.lung_middle_lobe_right",
+    "respiratory.lung_lower_lobe_right",
+    "respiratory.trachea",
+)
+PRESETS: dict[str, tuple[str, ...]] = {"heart-lungs": CLASSES, "chest": CHEST}
 REFERENCE = "s0029"
 
 
@@ -81,27 +105,38 @@ def label_volume(
     """One label volume (0 = nothing), its affine, and the count of voxels claimed twice.
 
     TotalSegmentator's labels do not overlap. A voxel claimed by two structures would be
-    counted, and keeps the later class, so nothing is hidden.
+    counted, and keeps the later class, so nothing is hidden. Crops are applied as Level 1
+    applies them (``assets.meshes``).
     """
     label_map = label_map or load_label_map(DEFAULT_LABEL_MAP)
     labels: npt.NDArray[np.uint8] | None = None
     affine: FloatArray | None = None
     overlaps = 0
+    references: dict[str, npt.NDArray[np.bool_]] = {}
+
+    def read(name: str) -> npt.NDArray[np.bool_]:
+        nonlocal labels, affine
+        mask, this_affine = read_mask(subject_dir / "segmentations" / f"{name}.nii.gz")
+        if labels is None:
+            labels = np.zeros(mask.shape, dtype=np.uint8)
+            affine = this_affine
+        elif affine is None or mask.shape != labels.shape:
+            raise ValueError(f"{name} is on a different grid from the other labels")
+        elif not np.allclose(this_affine, affine, atol=1e-4):
+            raise ValueError(f"{name} is on a different grid from the other labels")
+        return np.asarray(mask, dtype=bool)
+
     for index, entity in enumerate(classes, start=1):
         entry = label_map.for_entity(entity)
+        union = np.logical_or.reduce([read(name) for name in entry.labels])
         if entry.crop is not None:
-            raise ValueError(f"{entity} needs a crop; Level 2b's classes do not support crops yet")
-        for name in entry.labels:
-            mask, this_affine = read_mask(subject_dir / "segmentations" / f"{name}.nii.gz")
-            if labels is None:
-                labels = np.zeros(mask.shape, dtype=np.uint8)
-                affine = this_affine
-            elif affine is None or mask.shape != labels.shape:
-                raise ValueError(f"{name} is on a different grid from the other labels")
-            elif not np.allclose(this_affine, affine, atol=1e-4):
-                raise ValueError(f"{name} is on a different grid from the other labels")
-            overlaps += int(np.count_nonzero(mask & (labels > 0) & (labels != index)))
-            labels[mask] = index
+            if entry.crop not in references:
+                names = label_map.crops[entry.crop].reference_labels
+                references[entry.crop] = np.logical_or.reduce([read(n) for n in names])
+            union = _crop_to_extent(union, references[entry.crop])
+        assert labels is not None
+        overlaps += int(np.count_nonzero(union & (labels > 0) & (labels != index)))
+        labels[union] = index
     assert labels is not None and affine is not None
     return labels, affine, overlaps
 
@@ -172,6 +207,7 @@ def build(
     n_points: int = 200_000,
     seed: int = 0,
     split_from: Path | None = Path("datasets/processed/level2a/report.json"),
+    classes: Sequence[str] = CLASSES,
 ) -> dict[str, Any]:
     """Points for every subject, resumable; returns and writes ``manifest.json``."""
     subjects = list(subjects) if subjects is not None else _usable(scenes_root)
@@ -186,18 +222,18 @@ def build(
             stored = np.load(target)
             stats[subject] = json.loads(str(stored["stats"]))
             continue
-        labels, affine, overlaps = label_volume(raw_root / subject, CLASSES, label_map)
+        labels, affine, overlaps = label_volume(raw_root / subject, classes, label_map)
         frame = frame_for(scenes_root / subject, reference_heart, seed=seed)
         rng = np.random.default_rng([seed, position])
         points, point_labels = sample(labels, affine, frame, n_points=n_points, rng=rng)
         voxel_ml = float(abs(np.linalg.det(affine[:3, :3]))) / 1000.0
-        counts = np.bincount(labels.ravel(), minlength=len(CLASSES) + 1)
+        counts = np.bincount(labels.ravel(), minlength=len(classes) + 1)
         stats[subject] = {
             "overlapping_voxels": overlaps,
             "volume_ml": {
-                c: round(float(counts[i + 1]) * voxel_ml, 1) for i, c in enumerate(CLASSES)
+                c: round(float(counts[i + 1]) * voxel_ml, 1) for i, c in enumerate(classes)
             },
-            "point_label_counts": np.bincount(point_labels, minlength=len(CLASSES) + 1).tolist(),
+            "point_label_counts": np.bincount(point_labels, minlength=len(classes) + 1).tolist(),
             "frame": frame.to_dict(),
         }
         np.savez_compressed(
@@ -211,7 +247,7 @@ def build(
         split = {"train": report["train"], "held_out": report["held_out"], "from": str(split_from)}
     manifest = {
         "dataset": "lagnav level 2b labelled points",
-        "classes": ["nothing", *CLASSES],
+        "classes": ["nothing", *classes],
         "n_points": n_points,
         "sampling": {"boundary_fraction": 0.6, "jitter_mm": 1.5, "margin_mm": 10.0, "seed": seed},
         "frame": "Level 1 viewer frame (heart-shell centroid origin), aligned rigidly onto "
@@ -234,8 +270,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--points", type=int, default=200_000)
     parser.add_argument("--subjects", nargs="*", default=None)
+    parser.add_argument("--preset", choices=sorted(PRESETS), default="heart-lungs")
     args = parser.parse_args(argv)
-    manifest = build(args.raw, args.scenes, args.out, subjects=args.subjects, n_points=args.points)
+    manifest = build(
+        args.raw,
+        args.scenes,
+        args.out,
+        subjects=args.subjects,
+        n_points=args.points,
+        classes=PRESETS[args.preset],
+    )
     print(f"{len(manifest['subjects'])} subjects, classes {manifest['classes']}")
     return 0
 

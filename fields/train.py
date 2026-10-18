@@ -280,13 +280,17 @@ def train(
 
 
 def part_indices(data_dir: Path, prefixes: Sequence[str]) -> tuple[int, ...]:
-    """For classes 1..K of the data, the index of the first prefix each name starts with."""
+    """For classes 1..K of the data, the index of the first part each name belongs to.
+
+    A part is a prefix, or several joined by ``|``: ``heart.aorta|heart.pulmonary_trunk``.
+    """
     if not prefixes:
         return ()
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    groups = [tuple(part.split("|")) for part in prefixes]
     part_of = []
     for name in manifest["classes"][1:]:
-        matches = [i for i, prefix in enumerate(prefixes) if name.startswith(prefix)]
+        matches = [i for i, group in enumerate(groups) if name.startswith(group)]
         if not matches:
             raise SystemExit(f"class {name} matches none of the parts {list(prefixes)}")
         part_of.append(matches[0])
