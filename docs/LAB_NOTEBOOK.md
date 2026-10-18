@@ -1080,3 +1080,44 @@ data); code at `8fc2d04` + `f1bdcd4`.
     0.96 mm against run 5's 2.37.
   - Lungs are on a par with run 5, and both beat Level 2a.
 - **Run 6 is the candidate product model,** pending its generation and resize results.
+
+## 2026-10-19 (02:30) — Stray limits now come from real anatomy; resize experiments
+
+- **A flaw in the stray check, found and fixed.**
+  - **The flaw.** The limit was calibrated on each model's own decodes of its training
+    subjects ("no worse than the worst of them"). That ties the limit to the model: a messy
+    model gets a loose limit, a clean one a strict limit. Run 5's limits allowed up to 9.7%
+    stray in the RV; run 6's allowed 1.0%.
+  - **The fix,** following Level 2a's rule of calibrating on real anatomy (`real_stray`).
+    The 105 training subjects' CT label volumes are resampled on the same 2 mm grid and
+    cleaned the same way. Every real structure is one piece: the median stray is 0, and the
+    worst is 0.2%. With the 1-point margin, the limits are 1.0–1.2% for every structure,
+    and the same for every model.
+  - **Records.** All three reports were re-judged from the stray shares already stored per
+    sample, with no re-decoding. The model-based limits and verdicts are kept beside the
+    new ones (`stray_model`, `summary_model_stray`).
+- **Generation, 50 samples at 1 SD, unfiltered, with real-anatomy limits:**
+
+  | run | model-based limits | real-anatomy limits | novelty (vs 4.70 mm real) |
+  | --- | --- | --- | --- |
+  | 3 (one code, prior) | 94% | **92%** | 4.27 mm (91%) |
+  | 5 (parts) | 90% | **60%**, 40% fail on stray islands | 4.45 mm (95%) |
+  | 6 (parts, prior) | 88% | **88%**, failures mostly lungs too large | 4.43 mm (94%) |
+
+  The model-based limit had hidden run 5's fragmentation. Run 6 decodes clean anatomy.
+- **Resize experiments on run 5** (LV +15% on s0029; judged with run 5's *model-based*
+  limits, before the fix, so these are generous):
+  - prior 1.0: +6.6% size reached, passes, short of the ask; lungs unchanged;
+  - prior 0.1, 300 steps: +13.4% reached at +15%, but the LA breaks into pieces; the
+    largest passing change is **+7.5%** (+24% volume);
+  - plausibility prior (Mahalanobis under the code population): the whole heart grows
+    along the population's main axis (LA +34%, RV +26%), and the LV reaches only +5.5%;
+  - neighbours kept from shrinking (`--keep`): the largest passing change is **+8.3%**
+    (+27% volume); beyond it, the RV breaks into pieces.
+- **Run 6, default resize** (its own model limits): it reaches +14.6% at +15% asked, but
+  the LV and myocardium fragment; the largest passing change is **+4.0%**.
+- **Reading.** One chamber growing by 15% in size (52% in volume) while its neighbours
+  stay intact is rare in 105 healthy-ish thoraxes. The field can make the LV that large,
+  but only by breaking a neighbour, and the checks catch that. Level 2b's best (+8.3%) is
+  4× Level 2a's +2%, but the +15% target is not met. Run 6's resize with kept neighbours,
+  under real-anatomy limits, is running.

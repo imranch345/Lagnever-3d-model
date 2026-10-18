@@ -431,6 +431,27 @@ class TestGeneration:
             k for k, _ in judge(measured, limits, {lungs[0]: 1, lungs[1]: 1}, ontology)
         ]
 
+    def test_rejudging_stray_uses_the_stored_shares(self) -> None:
+        """Other stray limits change verdicts from stored shares; other failures are kept."""
+        from fields.generate import rejudge_stray
+
+        report = {
+            "samples": [
+                {
+                    "failures": ["stray: a 3.0% outside its largest piece"],
+                    "passes": False,
+                    "stray": {"a": 0.03},
+                },
+                {"failures": ["volume: a 1 mL outside 2-3"], "passes": False, "stray": {"a": 0.0}},
+                {"failures": [], "passes": True, "stray": {"a": 0.02}},
+            ]
+        }
+        loose = rejudge_stray(report, {"a": 0.05})
+        assert [r["passes"] for r in loose["samples"]] == [True, False, True]
+        strict = rejudge_stray(report, {"a": 0.01})
+        assert [r["passes"] for r in strict["samples"]] == [False, False, False]
+        assert strict["failing_by_kind"] == {"stray": 2 / 3, "volume": 1 / 3}
+
     def test_a_written_scene_is_a_level1_scene(self, tmp_path) -> None:
         """Labelled blobs become a GLB with one node per structure and a manifest that passes."""
         import trimesh

@@ -10,9 +10,14 @@ them":
   margin;
 * **sides:** lungs either side of the midline, left chambers left of right ones (Level 1's
   rule);
-* **stray:** the share of a structure's decoded volume outside its largest piece. The limit is
-  the worst share among the training subjects' own decoded codes, plus ``MARGIN``. The
-  largest piece is then kept, as in evaluation;
+* **stray:** the share of a structure's decoded volume outside its largest piece. The largest
+  piece is then kept, as in evaluation. The limit is the worst share among real subjects,
+  plus ``MARGIN``, and comes from one of two sources:
+  - **model** (the first version): the training subjects' own decoded codes. This ties the
+    limit to the model, so a cleaner model gets a stricter limit;
+  - **real** (``real_stray``): the training subjects' CT label volumes, resampled on the same
+    grid. This is Level 2a's rule, calibrated on real anatomy and the same for every model.
+    It is the default when the raw labels are given.
 * **closed:** every meshed structure is watertight;
 * **overlap:** zero by construction (one label per point), and verified on every sample from
   the margins.
@@ -74,6 +79,8 @@ __all__ = [
     "decode_thorax",
     "generate",
     "judge",
+    "real_stray",
+    "rejudge_stray",
     "write_scene",
 ]
 
@@ -147,6 +154,63 @@ def decode_thorax(field: Field, code: torch.Tensor, grid: Grid, classes: Sequenc
         if after:
             measures["centroids"][entity] = coords[cleaned == index].mean(axis=0).tolist()
     return Thorax(volume=cleaned, meshes=meshes, measures=measures)
+
+
+def real_stray(
+    raw_root: Path,
+    stats: Mapping[str, Any],
+    subjects: Sequence[str],
+    grid: Grid,
+    classes: Sequence[str],
+) -> dict[str, list[float]]:
+    """Per structure, each real subject's stray share: its CT labels on ``grid``, then cleaned."""
+    import nibabel as nib
+
+    from assets.meshes import RAS_TO_VIEWER
+    from fields.data import label_volume
+
+    shares: dict[str, list[float]] = {e: [] for e in classes}
+    aligned = grid.points().astype(np.float64)
+    for subject in subjects:
+        labels, affine, _ = label_volume(raw_root / subject, classes)
+        frame = stats[subject]["frame"]
+        rigid = np.asarray(frame["rigid"], dtype=np.float64)
+        viewer = (aligned - rigid[:3, 3]) @ rigid[:3, :3]
+        ras = viewer @ RAS_TO_VIEWER + np.asarray(frame["origin_ras_mm"], dtype=np.float64)
+        ijk = np.rint(nib.affines.apply_affine(np.linalg.inv(affine), ras)).astype(np.int64)
+        inside = np.all((ijk >= 0) & (ijk < np.asarray(labels.shape)), axis=1)
+        truth = np.zeros(len(ijk), dtype=np.uint8)
+        truth[inside] = labels[ijk[inside, 0], ijk[inside, 1], ijk[inside, 2]]
+        volume = truth.reshape(grid.shape)
+        cleaned, _ = keep_largest(volume, len(classes) + 1)
+        for index, entity in enumerate(classes, start=1):
+            before = int((volume == index).sum())
+            shares[entity].append(
+                0.0 if before == 0 else 1 - int((cleaned == index).sum()) / before
+            )
+    return shares
+
+
+def rejudge_stray(report: Mapping[str, Any], stray: Mapping[str, float]) -> dict[str, Any]:
+    """The report's samples judged again with other stray limits, from their stored shares."""
+    rows = []
+    for row in report["samples"]:
+        failures = [f for f in row["failures"] if not f.startswith("stray:")]
+        failures += [
+            f"stray: {e} {share:.1%} outside its largest piece"
+            for e, share in row["stray"].items()
+            if share > stray[e]
+        ]
+        rows.append({**row, "failures": failures, "passes": not failures})
+    kinds = sorted({f.split(":")[0] for r in rows for f in r["failures"]})
+    return {
+        "pass_rate": sum(r["passes"] for r in rows) / len(rows),
+        "failing_by_kind": {
+            k: sum(any(f.startswith(k) for f in r["failures"]) for r in rows) / len(rows)
+            for k in kinds
+        },
+        "samples": rows,
+    }
 
 
 def judge(
@@ -235,8 +299,13 @@ def generate(
     calibration: int | None = None,
     spacing_mm: float = 2.0,
     device: str | None = None,
+    raw_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Draw, decode, judge and measure novelty; with the limits and the real baseline."""
+    """Draw, decode, judge and measure novelty; with the limits and the real baseline.
+
+    With ``raw_root`` (the CT label volumes), stray limits come from real anatomy
+    (``real_stray``); the model-based limits are still recorded beside them.
+    """
     started = time.time()
     run_device = pick_device(device)
     field, checkpoint = load_checkpoint(checkpoint_path, run_device)
@@ -269,7 +338,13 @@ def generate(
     }
     calibrated = train if calibration is None else train[:calibration]
     own = [decode_thorax(field, as_code(codes[train.index(s)]), grid, classes) for s in calibrated]
-    stray_limits = {e: max(t.measures["stray"][e] for t in own) + MARGIN for e in classes}
+    model_stray = {e: max(t.measures["stray"][e] for t in own) + MARGIN for e in classes}
+    stray_limits = model_stray
+    stray_from = f"{len(own)} training subjects' own codes, plus {MARGIN:.0%}"
+    if raw_root is not None:
+        shares = real_stray(raw_root, stats, train, grid, classes)
+        stray_limits = {e: max(v) + MARGIN for e, v in shares.items()}
+        stray_from = f"{len(train)} training subjects' CT labels on this grid, plus {MARGIN:.0%}"
     print(f"limits from {len(own)} training decodes in {time.time() - started:.0f} s", flush=True)
 
     reference = Reference(scenes_root, train, stats, classes)
@@ -311,7 +386,8 @@ def generate(
         "limits": {
             "volume_ml": volume_limits,
             "stray": stray_limits,
-            "stray_from": f"{len(own)} training subjects' own codes, plus {MARGIN:.0%}",
+            "stray_from": stray_from,
+            "stray_model": model_stray,
         },
         "control": {
             "training_decodes_passing": sum(not c for c in control) / len(control),
@@ -488,6 +564,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calibration", type=int, default=None, help="training decodes")
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--raw", type=Path, default=None, help="CT labels: real stray limits")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     report = generate(
@@ -500,6 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         calibration=args.calibration,
         spacing_mm=args.spacing,
         device=args.device,
+        raw_root=args.raw,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
