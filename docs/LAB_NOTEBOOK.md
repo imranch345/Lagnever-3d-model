@@ -871,3 +871,29 @@ data); code at `8fc2d04` + `f1bdcd4`.
   1. New VM, same flags; upload code and data.
   2. Copy back `runs/gpu/m2-h512-focus-z128/state.pt` and `runs/gpu/m2-parts-h384/state.pt`.
   3. Start the same commands. Training continues from the saved step exactly.
+
+## 2026-10-18 (13:15) — Level 2b M2, run 3: a stronger code prior helps the heart
+
+- **Run 3 (`m2-h512-focus-prior`): run 2 with the code prior raised from 1e-4 to 1e-2.**
+  Its held-out evaluation finished after the pause. Mean / median mm, after cleanup:
+
+  | structure | run 2 | run 3 (prior 1e-2) | Level 2a |
+  | --- | --- | --- | --- |
+  | LV | 1.32 / 1.22 | **1.29 / 1.11** | 0.89 / 0.82 |
+  | myocardium | 1.33 / 1.22 | **1.26 / 1.11** | 0.94 / 0.90 |
+  | RV | 1.83 / 1.67 | 1.86 / **1.51** | 1.24 / 1.20 |
+  | LA | 2.10 / 1.89 | **1.87 / 1.65** | 1.39 / 1.25 |
+  | RA | 2.14 / 1.90 | 2.14 / **1.70** | 1.60 / 1.43 |
+  | left lung | **3.25 / 2.48** | 3.35 / 2.65 | 3.80 / 3.58 |
+  | right lung | **3.44** / 2.91 | 3.68 / **2.79** | 4.71 / 4.05 |
+
+- **Reading:**
+  - Compact codes help a new person's heart, most visibly in the medians: LA 1.89 → 1.65,
+    RA 1.90 → 1.70, RV 1.67 → 1.51, LV 1.22 → 1.11.
+  - The lungs move slightly and stay ahead of Level 2a.
+  - **This supports the generalization diagnosis.** It also makes the prior a default for
+    the next runs: runs 4 and 5 should resume as they are, for a clean comparison, and then
+    take the prior.
+- **Best Level 2b so far (run 3) against Level 2a, by median:**
+  - the lungs are better;
+  - the heart is 0.2–0.4 mm behind, against a yardstick floor of about 0.35–0.47 mm.
