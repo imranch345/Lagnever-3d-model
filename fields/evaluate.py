@@ -3,7 +3,10 @@
 For each held-out subject:
 
 1. **Fit.** A fresh code is optimised on the subject's labelled points, with the network
-   frozen (auto-decoder test-time fitting, ``fit_steps`` Adam steps).
+   frozen (auto-decoder test-time fitting, ``fit_steps`` Adam steps). With ``fit_weighted``
+   the fit uses training's class weights, from the training subjects' point counts.
+   Otherwise every point counts the same, and the lungs and "nothing" (over 90% of points)
+   dominate the fit.
 2. **Decode.** The field is evaluated on a grid (``spacing_mm``) over the training points'
    extent. Each structure is meshed three ways:
    - **binary:** marching cubes on its label mask, the M1 method;
@@ -47,6 +50,7 @@ from skimage import measure
 from torch.nn import functional
 
 from fields.model import FieldConfig, LabelField, pick_device
+from fields.train import weights_from_counts
 from shapes.register import load_scene
 
 __all__ = [
@@ -235,6 +239,7 @@ def evaluate(
     subjects: Sequence[str] | None = None,
     level2a_dir: Path | None = None,
     fit_steps: int = 300,
+    fit_weighted: bool = False,
     spacing_mm: float = 2.0,
     device: str | None = None,
 ) -> dict[str, Any]:
@@ -257,13 +262,19 @@ def evaluate(
         spacing_mm,
     )
     models_2a = _level2a(level2a_dir) if level2a_dir is not None else None
+    weights = None
+    if fit_weighted:
+        counts = np.sum(
+            [manifest["stats"][s]["point_label_counts"] for s in checkpoint["subjects"]], axis=0
+        )
+        weights = weights_from_counts(torch.as_tensor(counts)).to(run_device)
     results: dict[str, Any] = {}
     for subject in subjects:
         started = time.time()
         stored = np.load(data_dir / "points" / f"{subject}.npz")
         points, labels = stored["points"], stored["labels"]
         rigid = np.asarray(manifest["stats"][subject]["frame"]["rigid"], dtype=np.float64)
-        code = fit_code(field, points, labels, steps=fit_steps)
+        code = fit_code(field, points, labels, steps=fit_steps, weights=weights)
         margins = decode_margins(field, code, grid)
         volume = margins.argmax(axis=0).astype(np.uint8)
         meshes = label_meshes(volume, grid, classes)
@@ -304,6 +315,7 @@ def evaluate(
         "classes": classes,
         "grid": {"low": grid.low.tolist(), "spacing_mm": grid.spacing, "shape": list(grid.shape)},
         "fit_steps": fit_steps,
+        "fit_weighted": fit_weighted,
         "subjects": results,
         "summary": _summary(results, classes),
     }
@@ -364,6 +376,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--level2a", type=Path, default=None)
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--fit-steps", type=int, default=300)
+    parser.add_argument("--fit-weighted", action="store_true", help="training's class weights")
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
@@ -375,6 +388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         subjects=args.subjects,
         level2a_dir=args.level2a,
         fit_steps=args.fit_steps,
+        fit_weighted=args.fit_weighted,
         spacing_mm=args.spacing,
         device=args.device,
     )

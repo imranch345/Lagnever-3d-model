@@ -35,7 +35,14 @@ from torch.nn import functional
 
 from fields.model import DEFAULT_FIELD, AutoDecoder, FieldConfig, pick_device
 
-__all__ = ["TrainConfig", "class_weights", "focus_points", "load_points", "train"]
+__all__ = [
+    "TrainConfig",
+    "class_weights",
+    "focus_points",
+    "load_points",
+    "train",
+    "weights_from_counts",
+]
 
 
 @dataclass(frozen=True)
@@ -73,7 +80,12 @@ def load_points(data_dir: Path, subjects: Sequence[str]) -> tuple[torch.Tensor, 
 
 def class_weights(labels: torch.Tensor, n_classes: int) -> torch.Tensor:
     """Inverse square-root frequency, mean 1; a class absent from the data gets weight 1."""
-    counts = torch.bincount(labels.flatten(), minlength=n_classes).double()
+    return weights_from_counts(torch.bincount(labels.flatten(), minlength=n_classes))
+
+
+def weights_from_counts(counts: torch.Tensor) -> torch.Tensor:
+    """``class_weights`` from per-class point counts."""
+    counts = counts.double()
     weights = torch.where(counts > 0, counts.clamp(min=1).rsqrt(), torch.ones_like(counts))
     return (weights / weights.mean()).float()
 
