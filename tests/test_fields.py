@@ -466,3 +466,37 @@ class TestGeneration:
         assert json.loads((tmp_path / "s" / "manifest.json").read_text())["generated"] == {
             "model": "test"
         }
+
+
+class TestResize:
+    """fields.resize: moving a code grows a structure, and only its own part."""
+
+    @pytest.mark.parametrize("parts", [False, True])
+    def test_a_code_moves_towards_the_target_volume(self, tmp_path, parts) -> None:
+        """Sphere 'a' of a trained field grows towards factor³ its volume; other parts stay."""
+        from fields.evaluate import Grid, decode, load_checkpoint
+        from fields.model import FieldConfig
+        from fields.resize import resize_code
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(steps=400, subjects_per_step=4, points_per_subject=2048, seed=0)
+        field = FieldConfig(
+            hidden=48,
+            layers=4,
+            latent_dim=8,
+            bands=4,
+            scale_mm=60.0,
+            part_of=(0, 1) if parts else (),
+        )
+        train(data_dir, tmp_path / "run", config, field, device="cpu")
+        model, checkpoint = load_checkpoint(tmp_path / "run" / "checkpoint.pt", torch.device("cpu"))
+        grid = Grid([-60, -60, -60], [60, 60, 60], 3.0)
+        start = checkpoint["codes"][1:2]
+        labels = decode(model, start, grid)
+        code, soft = resize_code(
+            model, start, 1, 1.1, grid, labels, steps=60, lr=5e-2, prior=0.0, margin_mm=15
+        )
+        assert soft["soft_after_ml"] > 1.15 * soft["soft_before_ml"], soft
+        if parts:
+            assert torch.equal(code[:, 8:], start[:, 8:]), "the other part's code must not move"
