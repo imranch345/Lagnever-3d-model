@@ -8,7 +8,8 @@ points, and minimises:
   Gaussian can later sample.
 
 With ``focus_fraction`` above 0, that share of each subject's points is drawn from the box
-around its heart structures (classes named ``focus_prefix``…, plus ``focus_margin_mm``). The
+around its heart structures (classes named ``focus_prefix``…, several prefixes joined by
+``|``, plus ``focus_margin_mm``). The
 heart's five structures hold under 9% of the points, against over 90% for the lungs and
 "nothing"; focusing gives their boundaries more of every step without changing the data.
 
@@ -162,9 +163,8 @@ def train(
     points, labels = load_points(data_dir, subjects)
     weights = class_weights(labels, field_config.n_classes).to(run_device)
     n_focus = int(round(config.points_per_subject * config.focus_fraction))
-    focus = [
-        k for k, name in enumerate(manifest["classes"]) if name.startswith(config.focus_prefix)
-    ]
+    focus_group = tuple(config.focus_prefix.split("|"))
+    focus = [k for k, name in enumerate(manifest["classes"]) if name.startswith(focus_group)]
     focus_index, focus_counts = focus_points(points, labels, focus, config.focus_margin_mm)
     # All points live on the device (~0.4 GB for 105 subjects); a step then indexes there.
     points, labels = points.to(run_device), labels.to(run_device)
@@ -326,6 +326,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--focus-fraction", type=float, default=TrainConfig.focus_fraction)
     parser.add_argument("--focus-margin", type=float, default=TrainConfig.focus_margin_mm)
+    parser.add_argument(
+        "--focus-prefix",
+        default=TrainConfig.focus_prefix,
+        help="classes to focus on: a prefix, or several joined by |",
+    )
     args = parser.parse_args(argv)
     config = TrainConfig(
         steps=args.steps,
@@ -340,6 +345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.seed,
         focus_fraction=args.focus_fraction,
         focus_margin_mm=args.focus_margin,
+        focus_prefix=args.focus_prefix,
     )
     field = FieldConfig(
         hidden=args.hidden,
