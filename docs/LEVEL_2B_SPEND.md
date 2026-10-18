@@ -12,6 +12,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.43 (14:05–14:31 UTC) | ~0.15 (estimate) | M2 | second session: runs 4 and 5 resumed; **preempted** by Google at 14:31, VM deleted by its termination action | **~1.15** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.43 (14:36–16:02 UTC) | ~0.50 (estimate) | M2 | third session: run 4 finished, run 5 to step 28000, run 6 started; **preempted** at 16:02 | **~1.65** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 1.47 (16:04–17:32 UTC) | ~0.50 (estimate) | M2 | fourth session: runs 5 and 6 finished; VM deleted | **~2.15** |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.01 (22:56:58–22:57:39 UTC) | ~0.01 | M2/stage 2 | stage 2 chest runs A and B, approved by the user (≤ $5): **preempted 41 s after creation**, before training began; the user then paused for the night | **~2.16** |
 
 ## Sessions
 
@@ -64,3 +65,11 @@ provider's own billing figures. A cap is a hard stop.
     did not start until 16:18. Fixed with `ssh -n`.
   - **Day total:** about 6.2 VM-hours across four spot sessions, two of them preempted, for
     an estimated **~$2.15**. M2's cap is $50.
+
+### 2026-10-18 · Stage 2 attempt · preempted at once, then paused
+
+- The user approved a spot session for the stage 2 chest runs, capped at $5.
+- The VM was created at 22:56:58 UTC in us-central1-a, after us-east1-b/c/d had no
+  capacity. Google preempted it 41 s later, before the upload finished.
+- The user then asked to pause for the night. The launcher was stopped, and a check confirmed
+  that no lagnav instance or disk remains. Cost: about $0.01.

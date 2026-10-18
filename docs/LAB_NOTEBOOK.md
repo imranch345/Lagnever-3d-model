@@ -1137,3 +1137,37 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Deleting the shed piece would leave a hole in the wall,** so the refusal stands.
   - **Next lever:** resolution (finer sampling and decoding near walls, milestone M4), or a
     connectivity-aware training loss.
+
+## 2026-10-19 (04:35) — Roadmap written; stage 2 data built; paused
+
+- **Roadmap** ([`ROADMAP.md`](ROADMAP.md)): five stages from the heart and lungs to "any body
+  part on request".
+  - **The target is stage 4,** the whole body at organ level, all 104 TotalSegmentator
+    structures. Estimate: about 2–3 months of work, within the $700 budget.
+  - **The data already labels all 104 structures.** 14 are used so far.
+- **Stage 2 (complete chest) data,** built on the Mac at $0 in 10 minutes. 131 subjects,
+  300k points each, 14 classes:
+  - the four chambers and the myocardium;
+  - aorta, pulmonary trunk, IVC (`fields.data` now applies Level 1's thorax crop to the aorta
+    and IVC);
+  - the five lobes and the trachea.
+
+  **Class shares:** chambers 0.9–1.7% each, IVC 0.56%, trachea 0.68%, lobes 3.6–8.3%.
+- **Overlap in the source labels.** TotalSegmentator's own masks overlap where structures
+  meet. On s0029: RA and IVC share 2510 voxels, the myocardium and the left upper lobe 2598,
+  the RA and the middle lobe 1536. Across all subjects, 355k voxels are claimed twice. As
+  before, the later class keeps the voxel (IVC over RA, lobes over the myocardium); Level 1's
+  meshes, built label by label, keep both. This slightly penalises the RA and myocardium
+  scores against Level 1 and is stated here so it is not mistaken for a model error.
+- **Training tools for stage 2:**
+  - part groups (`--parts 'heart.aorta|heart.pulmonary_trunk|heart.inferior_vena_cava'
+    heart. respiratory.`);
+  - focus on several prefixes (`--focus-prefix 'heart.left_|heart.right_|heart.myocardium'`),
+    so the focus box stays on the chambers and myocardium rather than the mediastinum;
+  - generation from the leading code axes only (`--variance`), and cached real-anatomy
+    limits.
+- **Planned stage 2 runs** (approved, spot, ≤ $5), not started:
+  - **A:** 14 classes, 3 parts, hidden 384, prior 1e-2, focus 0.5;
+  - **B:** A with Fourier bands 9, finer detail for thin walls.
+
+  The first VM was preempted 41 s after creation. The user then paused for the night.
