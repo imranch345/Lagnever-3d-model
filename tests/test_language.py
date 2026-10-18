@@ -207,6 +207,27 @@ class _ScriptedTranslator:
 class TestRouting:
     """The rule parser first; the translator only when it is needed and present."""
 
+    def test_a_name_the_rules_cannot_resolve_goes_to_the_translator(self, engine) -> None:
+        """'Show me the chamber that pumps blood to the body': form understood, name not."""
+        translator = _ScriptedTranslator(Program(steps=(Step("show", ("heart.left_ventricle",)),)))
+        result = LanguageLayer(engine, translator).execute(
+            "show me the chamber that pumps blood to the whole body"
+        )
+        assert result.ok and result.source == "claude"
+        assert translator.calls == ["show me the chamber that pumps blood to the whole body"]
+
+    def test_anatomy_not_in_the_scene_gets_the_models_refusal(self, engine) -> None:
+        """'Show me the spleen': the language model explains instead of a bare 'no match'."""
+        translator = _ScriptedTranslator(Program(refusal="There is no spleen in this scene."))
+        result = LanguageLayer(engine, translator).execute("show me the spleen")
+        assert not result.ok and result.source == "claude"
+        assert result.message == "There is no spleen in this scene."
+
+    def test_without_a_translator_an_unresolved_name_stays_with_the_rules(self, engine) -> None:
+        """No model configured: the rules' own answer, and how to enable the model."""
+        result = LanguageLayer(engine).execute("show me the spleen")
+        assert not result.ok and result.source == "rules" and ENABLE_VARIABLE in result.message
+
     def test_understood_text_never_reaches_the_translator(self, engine) -> None:
         """Free and instant for everything the parser already knows."""
         translator = _ScriptedTranslator(Program(steps=(Step("reset"),)))

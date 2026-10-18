@@ -43,6 +43,8 @@ __all__ = [
 ]
 
 ENABLE_VARIABLE = "LAGNAV_LANGUAGE"
+#: The engine's error code when a sentence's form is understood but its anatomy name is not.
+UNRESOLVED_NAME = "UnknownEntityReferenceError"
 
 #: Reshape ``entity`` to ``factor`` times its linear size; return (applied, message).
 ResizeHook = Callable[[str, float], tuple[bool, str]]
@@ -160,6 +162,12 @@ class LanguageLayer:
             return self._resize_request(text, *requested)
         if self.engine.parser.parse(text).is_understood or self.translator is None:
             response = self.engine.execute(text)
+            # The rules read the sentence's form ("show me X") but not the name X: a description
+            # ("the chamber that pumps blood to the body") or anatomy not in the scene. A failed
+            # command changes nothing, so the language model may try, or explain the refusal.
+            unresolved = response.error_code == UNRESOLVED_NAME
+            if not response.ok and unresolved and self.translator is not None:
+                return self._translate(text)
             message = str(response.message)
             if not response.ok and self.translator is None:
                 message += (
@@ -172,6 +180,11 @@ class LanguageLayer:
                 operations=[response.operation] if response.ok and response.operation else [],
             )
 
+        return self._translate(text)
+
+    def _translate(self, text: str) -> LanguageResult:
+        """The language model's path: a validated program, applied step by step."""
+        assert self.translator is not None
         try:
             program = self.translator.translate(text)
         except ProgramError as exc:

@@ -653,3 +653,27 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - lets the shell override the file;
   - reports variable names, never values.
   Tested.
+- **First live test of the Claude language path** (`claude-opus-5-5`, effort low). The key was
+  read from the user's private file and never printed. Eleven requests, 2–4 s each:
+  - **understood correctly:**
+    - "let me see inside the heart": isolate the heart, walls at 30% opacity, show the
+      internal structures;
+    - "only the right side of the heart": RA, RV and tricuspid valve;
+    - "make the lungs see-through…";
+    - "reset everything";
+  - **Hinglish:**
+    - "dil ke left ventricle ko 10% chhota karo" became `resize heart.left_ventricle -10`;
+    - "phephde chhupa do aur sirf dil dikhao" became hide the lungs, isolate the heart;
+  - **descriptions:** "the chamber that pumps blood to the whole body" became the left
+    ventricle;
+  - **refusals:** "show me the spleen" became "The spleen is not one of the structures in
+    this scene…".
+- **Bug found by the live test, and fixed.**
+  - **Symptom.** "Show me X" sentences never reached Claude when X was a description or
+    absent anatomy. The rule parser recognised the form, failed to resolve the name, and
+    stopped there.
+  - **Fix.** When the rules fail only on an unresolved name and the language model is
+    enabled, the request goes to the model. A failed rule command changes nothing, so this is
+    safe.
+  - **Tests:** the fallback; a refusal for absent anatomy; and rules-only behaviour without a
+    model.
