@@ -677,3 +677,22 @@ data); code at `8fc2d04` + `f1bdcd4`.
     safe.
   - **Tests:** the fallback; a refusal for absent anatomy; and rules-only behaviour without a
     model.
+- **Level 2b M1, on this Mac, $0 spent:**
+  - **Environment.** PyTorch 2.14 is installed in the product environment, with the user's
+    approval. The M2 GPU works through MPS.
+  - **Data** (`fields.data`). 200k labelled points per subject for all 131 usable subjects,
+    60% near label boundaries, in Level 2a's aligned frame. Verified on two real subjects:
+    94–96% of points labelled k lie inside entity k's Level 1 mesh.
+  - **Model and training** (`fields.model`, `fields.train`):
+    - a label field with one code per subject;
+    - class-weighted cross-entropy;
+    - atomic checkpoints every 500 steps, with exact resume. A test proves a run stopped and
+      resumed is bit-identical to an uninterrupted one. This was added after the first full
+      run started on a 35% battery.
+  - **Evaluation** (`fields.evaluate`). Held-out code fitting, grid decoding and marching
+    cubes. Level 2b and Level 2a are both scored by surface distance to the real Level 1
+    meshes, the same rule for both.
+  - **Bugs found by tests.** Decoded meshes came out inside-out, with negative volume. Fixed
+    as Level 1 does.
+  - **First full prototype.** 105 training subjects, 4000 steps, started 08:16, about 1.6
+    steps/s on MPS. Evaluation on the 26 held-out subjects follows automatically.
