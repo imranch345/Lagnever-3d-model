@@ -10,7 +10,8 @@ provider's own billing figures. A cap is a hard stop.
 | – | – | – | – | 0.00 | – | nothing spent yet | **0.00** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 2.83 (04:44–07:34 UTC) | ~1.00 (estimate; billing figure to replace it) | M2 | VM `lagnav-2b-m2`: benchmark and five training runs; deleted when the user paused | **~1.00** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.43 (14:05–14:31 UTC) | ~0.15 (estimate) | M2 | second session: runs 4 and 5 resumed; **preempted** by Google at 14:31, VM deleted by its termination action | **~1.15** |
-| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | running since 14:36 UTC | pending | M2 | third session, after the user chose spot again: resume runs 4 (step 12000) and 5 (step 6000), then run 6 | pending |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.43 (14:36–16:02 UTC) | ~0.50 (estimate) | M2 | third session: run 4 finished, run 5 to step 28000, run 6 started; **preempted** at 16:02 | **~1.65** |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | running since 16:04 UTC | pending | M2 | fourth session, within the user's spot choice ("may be preempted again; resumes each time"): runs 5 and 6 | pending |
 
 ## Sessions
 
@@ -51,3 +52,8 @@ provider's own billing figures. A cap is a hard stop.
 - **Third VM** created at 14:36 UTC in us-central1-c. Five zones had no spot L4 capacity
   first: us-east1-b/c/d and us-central1-a/b. Both runs resumed from their saved steps. Launch,
   upload and resume are now one script, so a further preemption costs minutes.
+- **Preempted again at 16:02 UTC,** after 1.43 h. By then run 4 had finished and its
+  checkpoint was on the Mac. Run 5 was saved at step 28,000 and run 6 at step 2,000.
+- **Fourth VM** created at 16:04 UTC in us-central1-a, after us-east1-b/c/d had no capacity.
+  It is covered by the user's spot choice, whose stated terms were "may be preempted again;
+  resumes each time". Spend stays far under the M2 cap: about $1.65 so far, against $50.
