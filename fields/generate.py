@@ -23,6 +23,12 @@ and the nearest training subject's value is the novelty. The same number for eac
 *real* subject gives the baseline: how far a new real person is from the training set. Samples
 should be about as novel as that. Much less would mean copies of training subjects.
 
+**Scenes.** ``SampleWriter`` turns a valid draw into a Level 1 scene, so the viewer, AWR and
+language layer work unchanged. It writes a GLB with one mesh per structure, made from the
+cleaned labels by Level 1's own ``mask_to_mesh`` (smoothing, decimation), and a manifest with
+the "generated" record and the verdict. As in Level 2a, a seed tries up to ``MAX_TRIES``
+draws and keeps the first that passes; the limits come from the report this module writes.
+
     python -m fields.generate --checkpoint runs/gpu/m2-h512-focus-prior/checkpoint.pt
         --data datasets/processed/level2b --scenes datasets/processed/level1/real
         --samples 50 --out runs/gpu/m2-h512-focus-prior/samples.json
@@ -34,7 +40,7 @@ import argparse
 import json
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +50,8 @@ import torch
 import trimesh
 from scipy.spatial import cKDTree  # type: ignore[import-untyped]
 
-from assets.meshes import side_report
+from assets.meshes import VIEWER_FRAME, mask_to_mesh, side_report
+from assets.quality import assess
 from awr.ontology import AnatomyOntology, load_ontology
 from fields.evaluate import (
     Grid,
@@ -59,16 +66,25 @@ from fields.model import Field, pick_device
 __all__ = [
     "CLIP",
     "MARGIN",
+    "MAX_TRIES",
+    "SampleWriter",
     "CodeGaussian",
     "Reference",
     "Thorax",
     "decode_thorax",
     "generate",
     "judge",
+    "write_scene",
 ]
 
 CLIP = 3.0
 MARGIN = 0.01
+#: Draws a seed tries before giving up (Level 2a uses the same number).
+MAX_TRIES = 6
+MEDICAL_STATUS = (
+    "generated anatomy from a neural label field; not a measurement of anyone; "
+    "not validated; not for clinical use"
+)
 SURFACE_SAMPLES = 3000
 
 FloatArray = npt.NDArray[np.float64]
@@ -325,6 +341,139 @@ def generate(
         "samples": rows,
         "seconds": round(time.time() - started, 1),
     }
+
+
+class SampleWriter:
+    """Valid Level 2b thoraxes written as Level 1 scenes, for the viewer.
+
+    ``report`` is this module's JSON report for the same checkpoint; its limits are reused, so
+    a scene is judged exactly as the measured samples were.
+    """
+
+    def __init__(
+        self,
+        checkpoint_path: Path,
+        data_dir: Path,
+        report: Path,
+        *,
+        device: str | None = None,
+        ontology: AnatomyOntology | None = None,
+    ) -> None:
+        self.field, checkpoint = load_checkpoint(checkpoint_path, pick_device(device))
+        self.checkpoint = checkpoint_path
+        self.classes = list(checkpoint["classes"][1:])
+        self.gaussian = CodeGaussian.fit(checkpoint["codes"].numpy())
+        self.training_subjects = len(checkpoint["subjects"])
+        measured = json.loads(report.read_text(encoding="utf-8"))
+        if Path(measured["checkpoint"]).name != checkpoint_path.name:
+            raise ValueError(f"{report} was measured for {measured['checkpoint']}")
+        grid = measured["grid"]
+        high = np.asarray(grid["low"]) + grid["spacing_mm"] * (np.asarray(grid["shape"]) - 1)
+        self.grid = Grid(grid["low"], high, grid["spacing_mm"])
+        self.volume_ml = {e: tuple(v) for e, v in measured["limits"]["volume_ml"].items()}
+        self.stray = dict(measured["limits"]["stray"])
+        self.ontology = ontology or load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+        source = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))["source"]
+        self.source = source
+
+    def write(self, seed: int, out_dir: Path, spread: float = 1.0) -> dict[str, Any]:
+        """The first valid draw of ``seed``'s ``MAX_TRIES``, written; or an error if none is."""
+        rejected: list[list[str]] = []
+        for attempt in range(MAX_TRIES):
+            code = self.gaussian.draw(seed * 1000 + attempt, spread)
+            thorax = decode_thorax(
+                self.field,
+                torch.as_tensor(code, dtype=torch.float32).unsqueeze(0),
+                self.grid,
+                self.classes,
+            )
+            failures = judge(thorax.measures, self.volume_ml, self.stray, self.ontology)
+            if not failures:
+                generated = {
+                    "model": "Level 2b neural label field",
+                    "checkpoint": self.checkpoint.name,
+                    "seed": seed,
+                    "spread": spread,
+                    "code": [round(float(c), 6) for c in code],
+                    "training_subjects": self.training_subjects,
+                    "sampler": {
+                        "kind": f"gaussian over codes at {spread:g} SD, kept only if valid",
+                        "tries": attempt + 1,
+                        "rejected": rejected,
+                    },
+                }
+                return write_scene(
+                    thorax.volume,
+                    self.grid,
+                    self.classes,
+                    out_dir,
+                    subject=f"sample-2b-{seed}",
+                    generated=generated,
+                    source=self.source,
+                    ontology=self.ontology,
+                )
+            rejected.append([message for _, message in failures][:3])
+        raise RuntimeError(f"no valid thorax in {MAX_TRIES} draws for seed {seed}: {rejected}")
+
+
+def write_scene(
+    volume: np.ndarray,
+    grid: Grid,
+    classes: Sequence[str],
+    out_dir: Path,
+    *,
+    subject: str,
+    generated: Mapping[str, Any],
+    source: Mapping[str, Any],
+    ontology: AnatomyOntology,
+) -> dict[str, Any]:
+    """A cleaned label volume as a Level 1 scene: ``scene.glb`` and ``manifest.json``."""
+    affine = np.diag([grid.spacing, grid.spacing, grid.spacing, 1.0])
+    affine[:3, 3] = grid.low
+    scene = trimesh.Scene()
+    entities: dict[str, Any] = {}
+    centroids: dict[str, list[float]] = {}
+    for index, entity_id in enumerate(classes, start=1):
+        mask = volume == index
+        if not mask.any():
+            continue
+        mesh, quality = mask_to_mesh(mask, affine)
+        quality.voxel_components = 1  # each structure was cut to its largest piece
+        entities[entity_id] = {
+            "node": entity_id,
+            "centroid_viewer_mm": quality.centroid_mm,
+            "quality": asdict(quality),
+        }
+        centroids[entity_id] = quality.centroid_mm
+        scene.add_geometry(mesh, node_name=entity_id, geom_name=entity_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "scene.glb").write_bytes(scene.export(file_type="glb"))
+    renderable = [e for e in ontology.ids() if ontology.get(e).renderable]
+    manifest: dict[str, Any] = {
+        "manifest_version": "0.1.0",
+        "subject": subject,
+        "scene": "scene.glb",
+        "frame": VIEWER_FRAME,
+        "generated": dict(generated),
+        "ontology": {"ontology_id": ontology.ontology_id, "version": ontology.version},
+        "source": {
+            "dataset": source.get("dataset", ""),
+            "version": source.get("version", ""),
+            "license": source.get("license", ""),
+            "attribution": source.get("attribution", ""),
+            "url": source.get("url", ""),
+            "derived": "sampled from a model trained on the listed dataset",
+        },
+        "entities": entities,
+        "missing": [],
+        "no_geometry": [e for e in renderable if e not in entities],
+        "sides_correct": side_report(centroids, ontology),
+        "medical_status": MEDICAL_STATUS,
+        "validity": {"passes": True, "failures": []},
+    }
+    manifest["checks"] = asdict(assess(manifest))
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
 
 
 def main(argv: Sequence[str] | None = None) -> int:

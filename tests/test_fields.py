@@ -430,3 +430,39 @@ class TestGeneration:
         assert "sides" in [
             k for k, _ in judge(measured, limits, {lungs[0]: 1, lungs[1]: 1}, ontology)
         ]
+
+    def test_a_written_scene_is_a_level1_scene(self, tmp_path) -> None:
+        """Labelled blobs become a GLB with one node per structure and a manifest that passes."""
+        import trimesh
+
+        from awr.ontology import load_ontology
+        from fields.evaluate import Grid
+        from fields.generate import write_scene
+
+        ontology = load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
+        grid = Grid([-120, -120, -120], [120, 120, 120], 4.0)
+        points = grid.points().reshape(*grid.shape, 3)
+        volume = np.zeros(grid.shape, dtype=np.uint8)
+        classes = ["respiratory.left_lung", "respiratory.right_lung", "heart.myocardium"]
+        volume[np.linalg.norm(points - [70, 0, 0], axis=-1) < 40] = 1  # +X is the left
+        volume[np.linalg.norm(points - [-70, 0, 0], axis=-1) < 40] = 2
+        volume[np.linalg.norm(points - [0, 0, 0], axis=-1) < 20] = 3
+        manifest = write_scene(
+            volume,
+            grid,
+            classes,
+            tmp_path / "s",
+            subject="sample-2b-0",
+            generated={"model": "test"},
+            source={},
+            ontology=ontology,
+        )
+        loaded = trimesh.load(tmp_path / "s" / "scene.glb")
+        assert set(loaded.geometry) == set(classes)
+        assert manifest["sides_correct"] == {classes[0]: True, classes[1]: True}
+        assert manifest["entities"][classes[2]]["quality"]["volume_ml"] == pytest.approx(
+            4 / 3 * np.pi * 20**3 / 1000, rel=0.15
+        )
+        assert json.loads((tmp_path / "s" / "manifest.json").read_text())["generated"] == {
+            "model": "test"
+        }

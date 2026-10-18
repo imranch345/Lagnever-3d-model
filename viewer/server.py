@@ -337,10 +337,30 @@ def make_server(app: ViewerApp, port: int = 8765) -> ThreadingHTTPServer:
     return ThreadingHTTPServer(("127.0.0.1", port), _handler(app))
 
 
-def build_app(scene: Path, model: Path | None = None) -> ViewerApp:
-    """The viewer for a built scene, with sampling and resizing when a model is given."""
+def build_app(
+    scene: Path,
+    model: Path | None = None,
+    field: Path | None = None,
+    field_data: Path = Path("datasets/processed/level2b"),
+) -> ViewerApp:
+    """The viewer for a built scene, with sampling and resizing when a model is given.
+
+    With ``field`` (a Level 2b checkpoint, with ``fields.generate``'s ``samples.json`` beside
+    it) thoraxes are drawn from the neural field instead, kept only if valid. Resizing is then
+    off: Level 2a's resize works on its own template meshes, not on a field's.
+    """
     sampler = None
     resizer: Resizer | None = None
+    if field is not None:
+        from fields.generate import SampleWriter
+
+        writer = SampleWriter(field, field_data, field.parent / "samples.json")
+
+        def sampler(seed: int, out: Path) -> dict[str, Any]:
+            return writer.write(seed, out)
+
+        print("Sampling from the Level 2b field; resizing is off.", flush=True)
+        return ViewerApp(scene, sampler=sampler, samples_dir=field.parent / "viewer_scenes")
     if model is not None:
         from shapes.generate import write_sample_scene
         from shapes.joint import JointModel
@@ -405,11 +425,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="joint shape model (shapes.build) to draw generated thoraxes from",
     )
+    parser.add_argument(
+        "--field",
+        type=Path,
+        default=None,
+        help="Level 2b checkpoint to draw thoraxes from instead (samples.json beside it)",
+    )
     args = parser.parse_args(argv)
     loaded = load_user_env()
     if loaded:
         print(f"Loaded from ~/.lagnav/anthropic.env: {', '.join(sorted(loaded))}", flush=True)
-    app = build_app(args.scene, args.model)
+    app = build_app(args.scene, args.model, args.field)
     server = make_server(app, args.port)
     print(f"Lagnav viewer on http://127.0.0.1:{server.server_address[1]}/", flush=True)
     try:
