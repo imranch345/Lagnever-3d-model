@@ -8,3 +8,22 @@ provider's own billing figures. A cap is a hard stop.
 | date | provider | GPU | hours | cost (USD) | milestone | purpose | running total |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | – | – | – | – | 0.00 | – | nothing spent yet | **0.00** |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | running since 04:44 UTC | pending | M2 | VM `lagnav-2b-m2`: benchmark, then long training run; auto-deletes after 6 h | pending |
+
+## Sessions
+
+### 2026-10-18 · M2 first GPU run · `lagnav-2b-m2`
+
+- **Machine:** g2-standard-8 (8 vCPU, 32 GB) with 1× NVIDIA L4 (24 GB). Spot provisioning;
+  zone us-central1-a. Image `pytorch-2-9-cu129-ubuntu-2404-nvidia-580-v20261001` (PyTorch
+  2.9.1, CUDA 12.9, driver 580). 100 GB balanced boot disk.
+- **Safeguards:**
+  - `--max-run-duration 6h` with termination action DELETE: the VM deletes itself at six
+    hours whatever happens.
+  - No service account and no API scopes, so the VM holds no credentials to the project
+    (which also hosts production Firebase and user uploads).
+  - SSH by a dedicated key in instance metadata, with project keys blocked; project
+    metadata unchanged.
+  - The Mac pulls checkpoints, so a preemption loses at most one save interval.
+- **Created:** 2026-10-18 04:44 UTC by `gcloud compute instances create`, after the user's
+  explicit yes to the plan and its estimate (~$0.25–0.45 per hour spot; ~$1–3 in total).

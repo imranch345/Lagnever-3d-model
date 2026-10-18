@@ -87,6 +87,7 @@ def train(
     device: str | None = None,
     subjects: Sequence[str] | None = None,
     stop_after: int | None = None,
+    tf32: bool = False,
 ) -> dict[str, Any]:
     """Train, resumable from ``out_dir/state.pt``; returns the final record.
 
@@ -94,7 +95,8 @@ def train(
     optimiser, schedule, step and both random generators. A run stopped for any reason (a flat
     battery, a reclaimed cloud machine) continues from there when started again with the same
     settings, and draws the same batches it would have drawn. ``stop_after`` stops early on
-    purpose; it exists for the test that proves this.
+    purpose; it exists for the test that proves this. ``tf32`` lets an NVIDIA GPU multiply in
+    TensorFloat-32 (about twice as fast on an L4); the checkpoint records it.
     """
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     if subjects is None:
@@ -108,8 +110,12 @@ def train(
     rng = np.random.default_rng(config.seed)
     run_device = pick_device(device)
 
+    if tf32 and run_device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
     points, labels = load_points(data_dir, subjects)
     weights = class_weights(labels, field_config.n_classes).to(run_device)
+    # All points live on the device (~0.4 GB for 105 subjects); a step then indexes there.
+    points, labels = points.to(run_device), labels.to(run_device)
     model = AutoDecoder(len(subjects), field_config).to(run_device)
     optimizer = torch.optim.Adam(
         [
@@ -118,8 +124,8 @@ def train(
         ]
     )
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.steps)
-    probe_subjects = torch.arange(min(4, len(subjects)))
-    probe_index = torch.from_numpy(rng.integers(points.shape[1], size=16384))
+    probe_subjects = torch.arange(min(4, len(subjects)), device=run_device)
+    probe_index = torch.from_numpy(rng.integers(points.shape[1], size=16384)).to(run_device)
     history: list[dict[str, Any]] = []
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
@@ -161,15 +167,16 @@ def train(
                 points.shape[1], size=(config.subjects_per_step, config.points_per_subject)
             )
         )
-        batch_points = torch.gather(points[chosen], 1, index.unsqueeze(-1).expand(-1, -1, 3))
-        batch_labels = torch.gather(labels[chosen], 1, index)
-        logits = model(batch_points.to(run_device), chosen.to(run_device))
+        chosen, index = chosen.to(run_device), index.to(run_device)
+        batch_points = points[chosen.unsqueeze(1), index]
+        batch_labels = labels[chosen.unsqueeze(1), index]
+        logits = model(batch_points, chosen)
         loss = functional.cross_entropy(
             logits.reshape(-1, field_config.n_classes),
-            batch_labels.to(run_device).reshape(-1),
+            batch_labels.reshape(-1),
             weight=weights,
         )
-        prior = model.codes(chosen.to(run_device)).pow(2).sum(-1).mean()
+        prior = model.codes(chosen).pow(2).sum(-1).mean()
         total = loss + config.code_prior * prior
         optimizer.zero_grad(set_to_none=True)
         total.backward()
@@ -178,9 +185,9 @@ def train(
 
         if step % config.eval_every == 0 or step == config.steps:
             with torch.no_grad():
-                probe_points = points[probe_subjects][:, probe_index].to(run_device)
-                probe_truth = labels[probe_subjects][:, probe_index].to(run_device)
-                predicted = model(probe_points, probe_subjects.to(run_device)).argmax(-1)
+                probe_points = points[probe_subjects][:, probe_index]
+                probe_truth = labels[probe_subjects][:, probe_index]
+                predicted = model(probe_points, probe_subjects).argmax(-1)
                 record = {
                     "step": step,
                     "loss": round(float(loss), 5),
@@ -208,6 +215,7 @@ def train(
         "codes": model.codes.weight.detach().cpu(),
         "history": history,
         "device": str(run_device),
+        "tf32": bool(tf32 and run_device.type == "cuda"),
         "torch": torch.__version__,
     }
     torch.save(checkpoint, out_dir / "checkpoint.pt")
@@ -234,6 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--eval-every", type=int, default=TrainConfig.eval_every)
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--tf32", action="store_true", help="TensorFloat-32 matmuls on CUDA")
     args = parser.parse_args(argv)
     config = TrainConfig(
         steps=args.steps,
@@ -249,7 +258,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     field = FieldConfig(
         hidden=args.hidden, layers=args.layers, latent_dim=args.latent, bands=args.bands
     )
-    final = train(args.data, args.out, config, field, device=args.device)
+    final = train(args.data, args.out, config, field, device=args.device, tf32=args.tf32)
     print(f"final: {json.dumps(final)}")
     return 0
 

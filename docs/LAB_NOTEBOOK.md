@@ -726,3 +726,46 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Consequence.** The recipe is right, and the scale is not. This is M2's purpose: far longer
   training on a rented GPU. On the Mac, 50k steps would take about 9 hours; on a rented RTX
   4090, roughly 30–45 minutes. The user is asked to set up the GPU account.
+
+## 2026-10-18 (10:20) — Level 2b M2: first cloud GPU, benchmark, long run started
+
+- **Code-LR sweep on the Mac,** 2000 steps each, otherwise the prototype's settings:
+  - codes LR 1e-3: loss 0.474, probe accuracy 0.694;
+  - codes LR 1e-2: loss 0.452, probe accuracy 0.707.
+
+  Adopted 1e-2.
+- **Cloud account set up by the user.** Google Cloud project `lagnever-ai-app-n`, Compute
+  Engine API enabled, and a GPU quota of 1 (`GPUS_ALL_REGIONS`) requested and approved.
+- **The machine.** The user said yes to the plan and its estimate. VM `lagnav-2b-m2`:
+  - g2-standard-8 with 1× NVIDIA L4 (23 GB), spot, us-central1-a;
+  - Google's Deep Learning image with PyTorch 2.9.1, CUDA 12.9 and driver 580.
+- **Safeguards:**
+  - it deletes itself after 6 hours;
+  - no service account or API scopes, because the project also hosts production Firebase
+    data;
+  - a dedicated SSH key in instance metadata only;
+  - the Mac pulls checkpoints every 4 minutes, so preemption costs at most one interval.
+
+  Ledger: [`LEVEL_2B_SPEND.md`](LEVEL_2B_SPEND.md).
+- **Code change for the GPU** (`fields.train`). The whole point set (~0.4 GB) now lives on the
+  device, and a step indexes only the drawn points. Before, every step copied the drawn
+  subjects' full 200k-point arrays on the CPU. An optional `--tf32` flag allows
+  TensorFloat-32 matmuls on NVIDIA, and the checkpoint records it. All 10 Level 2b tests pass,
+  including bit-exact resume.
+- **Benchmark on the L4,** one training step, 105 subject codes:
+
+  | hidden | batch (subjects × points) | FP32 ms/step | TF32 ms/step | peak memory |
+  | --- | --- | --- | --- | --- |
+  | 256 | 8 × 8192 | 40.8 | 30.3 | 1.1 GB |
+  | 512 | 8 × 8192 | 111.7 | 67.0 | 2.2 GB |
+  | 512 | 16 × 16384 | – | 277.9 | 8.8 GB |
+  | 768 | 16 × 16384 | – | 521.0 | 13.1 GB |
+
+  The prototype's shape takes 30 ms per step here, against about 650 ms on the Mac's MPS:
+  **about 21× faster.**
+- **Run `m2-h512` started at 04:50 UTC:**
+  - hidden 512, 8 layers;
+  - 40,000 steps, 10× the prototype's 4000;
+  - codes LR 1e-2, TF32;
+  - 74 s per 1000 steps, so about 49 minutes in all;
+  - at step 1000, probe accuracy 0.660.
