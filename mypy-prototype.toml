@@ -15,5 +15,5 @@ disallow_untyped_defs = true
 # Level 1 asset pipeline (ADR-L1-003). scikit-image, trimesh and nibabel ship no type
 # information for the calls used here; this relaxes only the call check, only in this module.
 [[tool.mypy.overrides]]
-module = ["assets.meshes", "assets.phantom", "shapes.register", "shapes.generate", "shapes.validity", "shapes.resize"]
+module = ["assets.meshes", "assets.phantom", "shapes.register", "shapes.generate", "shapes.validity", "shapes.resize", "fields.data"]
 disallow_untyped_calls = false

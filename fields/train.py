@@ -1,0 +1,204 @@
+"""Train the Level 2b label field on the labelled points (``fields.data``).
+
+Each step draws ``subjects_per_step`` training subjects and ``points_per_subject`` of their
+points, and minimises:
+- class-weighted cross-entropy, because chambers are 1–2% of the points and the lungs about
+  40%; weights are the inverse square root of class frequency, normalised to mean 1;
+- plus ``code_prior`` × the mean squared code, which keeps the codes in a ball that a
+  Gaussian can later sample.
+
+Every ``eval_every`` steps it records loss, accuracy, and per-class intersection-over-union on
+a fixed probe of training points. A checkpoint holds the network, the codes, the config, the
+subject list and the history, so a run can be resumed, evaluated or sampled from.
+
+    python -m fields.train --data datasets/processed/level2b --out runs/level2b/m1 --steps 2000
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+from torch.nn import functional
+
+from fields.model import DEFAULT_FIELD, AutoDecoder, FieldConfig, pick_device
+
+__all__ = ["TrainConfig", "class_weights", "load_points", "train"]
+
+
+@dataclass(frozen=True)
+class TrainConfig:
+    """The run's settings; saved with every checkpoint."""
+
+    steps: int = 2000
+    subjects_per_step: int = 8
+    points_per_subject: int = 8192
+    lr_field: float = 5e-4
+    lr_codes: float = 1e-3
+    code_prior: float = 1e-4
+    eval_every: int = 200
+    seed: int = 0
+    max_subjects: int | None = None
+
+
+#: The default run; frozen, so sharing one instance is safe.
+DEFAULT_TRAIN = TrainConfig()
+
+
+def load_points(data_dir: Path, subjects: Sequence[str]) -> tuple[torch.Tensor, torch.Tensor]:
+    """All subjects' points (S, N, 3) and labels (S, N), as CPU tensors."""
+    points, labels = [], []
+    for subject in subjects:
+        stored = np.load(data_dir / "points" / f"{subject}.npz")
+        points.append(torch.from_numpy(stored["points"].astype(np.float32)))
+        labels.append(torch.from_numpy(stored["labels"].astype(np.int64)))
+    return torch.stack(points), torch.stack(labels)
+
+
+def class_weights(labels: torch.Tensor, n_classes: int) -> torch.Tensor:
+    """Inverse square-root frequency, mean 1; a class absent from the data gets weight 1."""
+    counts = torch.bincount(labels.flatten(), minlength=n_classes).double()
+    weights = torch.where(counts > 0, counts.clamp(min=1).rsqrt(), torch.ones_like(counts))
+    return (weights / weights.mean()).float()
+
+
+def _iou(predicted: torch.Tensor, truth: torch.Tensor, n_classes: int) -> list[float | None]:
+    out: list[float | None] = []
+    for k in range(n_classes):
+        union = ((predicted == k) | (truth == k)).sum().item()
+        out.append(None if union == 0 else ((predicted == k) & (truth == k)).sum().item() / union)
+    return out
+
+
+def train(
+    data_dir: Path,
+    out_dir: Path,
+    config: TrainConfig = DEFAULT_TRAIN,
+    field_config: FieldConfig = DEFAULT_FIELD,
+    *,
+    device: str | None = None,
+    subjects: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Train, checkpointing to ``out_dir/checkpoint.pt``; returns the final record."""
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    if subjects is None:
+        split = manifest.get("split")
+        subjects = [s for s in (split["train"] if split else manifest["subjects"])]
+        subjects = [s for s in subjects if (data_dir / "points" / f"{s}.npz").exists()]
+    if config.max_subjects is not None:
+        subjects = list(subjects)[: config.max_subjects]
+    field_config = replace(field_config, n_classes=len(manifest["classes"]))
+    torch.manual_seed(config.seed)
+    rng = np.random.default_rng(config.seed)
+    run_device = pick_device(device)
+
+    points, labels = load_points(data_dir, subjects)
+    weights = class_weights(labels, field_config.n_classes).to(run_device)
+    model = AutoDecoder(len(subjects), field_config).to(run_device)
+    optimizer = torch.optim.Adam(
+        [
+            {"params": model.field.parameters(), "lr": config.lr_field},
+            {"params": model.codes.parameters(), "lr": config.lr_codes},
+        ]
+    )
+    schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.steps)
+    probe_subjects = torch.arange(min(4, len(subjects)))
+    probe_index = torch.from_numpy(rng.integers(points.shape[1], size=16384))
+    history: list[dict[str, Any]] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+
+    for step in range(1, config.steps + 1):
+        chosen = torch.from_numpy(rng.choice(len(subjects), size=config.subjects_per_step))
+        index = torch.from_numpy(
+            rng.integers(
+                points.shape[1], size=(config.subjects_per_step, config.points_per_subject)
+            )
+        )
+        batch_points = torch.gather(points[chosen], 1, index.unsqueeze(-1).expand(-1, -1, 3))
+        batch_labels = torch.gather(labels[chosen], 1, index)
+        logits = model(batch_points.to(run_device), chosen.to(run_device))
+        loss = functional.cross_entropy(
+            logits.reshape(-1, field_config.n_classes),
+            batch_labels.to(run_device).reshape(-1),
+            weight=weights,
+        )
+        prior = model.codes(chosen.to(run_device)).pow(2).sum(-1).mean()
+        total = loss + config.code_prior * prior
+        optimizer.zero_grad(set_to_none=True)
+        total.backward()
+        optimizer.step()
+        schedule.step()
+
+        if step % config.eval_every == 0 or step == config.steps:
+            with torch.no_grad():
+                probe_points = points[probe_subjects][:, probe_index].to(run_device)
+                probe_truth = labels[probe_subjects][:, probe_index].to(run_device)
+                predicted = model(probe_points, probe_subjects.to(run_device)).argmax(-1)
+                record = {
+                    "step": step,
+                    "loss": round(float(loss), 5),
+                    "code_norm": round(float(prior.sqrt()), 4),
+                    "accuracy": round(float((predicted == probe_truth).float().mean()), 4),
+                    "iou": [
+                        None if v is None else round(v, 4)
+                        for v in _iou(predicted, probe_truth, field_config.n_classes)
+                    ],
+                    "seconds": round(time.time() - started, 1),
+                }
+            history.append(record)
+            print(json.dumps(record), flush=True)
+
+    checkpoint = {
+        "field_config": field_config.to_dict(),
+        "train_config": asdict(config),
+        "subjects": list(subjects),
+        "classes": manifest["classes"],
+        "field": model.field.state_dict(),
+        "codes": model.codes.weight.detach().cpu(),
+        "history": history,
+        "device": str(run_device),
+        "torch": torch.__version__,
+    }
+    torch.save(checkpoint, out_dir / "checkpoint.pt")
+    (out_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
+    return history[-1]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Train from the command line."""
+    parser = argparse.ArgumentParser(description="Train the Level 2b label field.")
+    parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--steps", type=int, default=TrainConfig.steps)
+    parser.add_argument("--subjects-per-step", type=int, default=TrainConfig.subjects_per_step)
+    parser.add_argument("--points-per-subject", type=int, default=TrainConfig.points_per_subject)
+    parser.add_argument("--max-subjects", type=int, default=None)
+    parser.add_argument("--hidden", type=int, default=FieldConfig.hidden)
+    parser.add_argument("--layers", type=int, default=FieldConfig.layers)
+    parser.add_argument("--latent", type=int, default=FieldConfig.latent_dim)
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args(argv)
+    config = TrainConfig(
+        steps=args.steps,
+        subjects_per_step=args.subjects_per_step,
+        points_per_subject=args.points_per_subject,
+        max_subjects=args.max_subjects,
+        seed=args.seed,
+    )
+    field = FieldConfig(hidden=args.hidden, layers=args.layers, latent_dim=args.latent)
+    final = train(args.data, args.out, config, field, device=args.device)
+    print(f"final: {json.dumps(final)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
