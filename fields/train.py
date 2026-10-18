@@ -281,6 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--bands", type=int, default=FieldConfig.bands)
     parser.add_argument("--lr-field", type=float, default=TrainConfig.lr_field)
     parser.add_argument("--lr-codes", type=float, default=TrainConfig.lr_codes)
+    parser.add_argument("--code-prior", type=float, default=TrainConfig.code_prior)
     parser.add_argument("--save-every", type=int, default=TrainConfig.save_every)
     parser.add_argument("--eval-every", type=int, default=TrainConfig.eval_every)
     parser.add_argument("--device", default=None)
@@ -295,6 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         points_per_subject=args.points_per_subject,
         lr_field=args.lr_field,
         lr_codes=args.lr_codes,
+        code_prior=args.code_prior,
         eval_every=args.eval_every,
         save_every=args.save_every,
         max_subjects=args.max_subjects,

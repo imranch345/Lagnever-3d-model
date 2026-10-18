@@ -769,3 +769,52 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - codes LR 1e-2, TF32;
   - 74 s per 1000 steps, so about 49 minutes in all;
   - at step 1000, probe accuracy 0.660.
+
+## 2026-10-18 (12:10) — Level 2b M2, run 1: the lungs pass Level 2a, the heart does not
+
+- **Run `m2-h512` finished.** 40,000 steps in 48 minutes on the L4. Final probe accuracy is
+  0.930 against the prototype's 0.69, with training loss 0.132.
+- **Two measurement checks before reading the numbers:**
+  - **Smooth meshing does not help.** Re-scoring the prototype with surfaces at the margin's
+    zero level gives 0.02–0.1 mm *larger* distances than the binary meshes. The voxel
+    staircase was not the gap. Binary remains the headline.
+  - **The yardstick's floor is low.** A perfect field (the true CT labels, decoded on the same
+    2 mm grid and meshed the same way) scores 0.35–0.47 mm against the Level 1 meshes. Every
+    millimetre above that is the model's.
+- **A failure mode found and fixed in the evaluation: stray islands.**
+  - **Symptom.** Run 1's *mean* surface distances came out worse than an interim look at step
+    12,000 (LV 3.15 against 1.42 mm), while medians were fine.
+  - **Cause.** The fitted field leaves small islands of a structure elsewhere in the subject's
+    data region, around 1000 voxels at most. For s0494, one LV island made 17.10 mm out of
+    what is 1.44 mm with the largest piece only. The islands sit inside the data box, not in
+    empty grid.
+  - **Fix.** The evaluation now also scores each structure after `keep_largest` (each modelled
+    structure is one piece in a real thorax), reports piece counts, and summarises by mean
+    and median. Raw scores stay reported. Generation will clean the same way.
+- **Held-out, 26 subjects,** surface distance in mm (mean / median). Prototype figures are raw;
+  2b's are after cleanup.
+
+  | structure | prototype | M2 run 1 | Level 2a |
+  | --- | --- | --- | --- |
+  | left lung | 6.87 / 6.27 | **3.61 / 2.88** | 3.80 / 3.58 |
+  | right lung | 7.36 / 6.48 | **3.93 / 2.74** | 4.71 / 4.05 |
+  | LV | 1.42 / 1.35 | 1.50 / 1.45 | 0.89 / 0.82 |
+  | myocardium | 1.35 / 1.27 | 1.51 / 1.44 | 0.94 / 0.90 |
+  | RV | 2.28 / 2.19 | 2.04 / 1.87 | 1.24 / 1.20 |
+  | LA | 2.10 / 2.08 | 2.48 / 1.97 | 1.39 / 1.25 |
+  | RA | 2.36 / 2.09 | 2.42 / 2.06 | 1.60 / 1.43 |
+
+  - **The lungs now beat Level 2a** on both mean and median, for both lungs. This is Level
+    2b's first structure-level win.
+  - **The heart did not move.** Training accuracy rose from 0.69 to 0.93, yet held-out heart
+    distances stayed at the prototype's level.
+  - **Reading.** For the heart, the limit is now generalization to a new person, not fitting
+    the training set: the network learns 105 hearts rather than "a heart".
+- **Heart structures are under-represented in training.** The five heart structures hold 8.7%
+  of the points, each chamber 1–2%. The lungs and "nothing" hold the remaining 91%.
+- **Next runs, one change each, on the same GPU:**
+  - **Run 2 (`m2-h512-focus`).** Half of every step's points come from the box around the
+    heart (± 10 mm). New option `--focus-fraction`.
+  - **Run 3 (`m2-h512-focus-prior`).** Run 2 plus a code prior 100× stronger (1e-2), to keep
+    codes in a compact, smooth region that a new person's fit can reach. New flag
+    `--code-prior`.
