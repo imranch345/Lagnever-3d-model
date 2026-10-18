@@ -44,6 +44,7 @@ class TrainConfig:
     lr_codes: float = 1e-3
     code_prior: float = 1e-4
     eval_every: int = 200
+    save_every: int = 500
     seed: int = 0
     max_subjects: int | None = None
 
@@ -85,8 +86,16 @@ def train(
     *,
     device: str | None = None,
     subjects: Sequence[str] | None = None,
+    stop_after: int | None = None,
 ) -> dict[str, Any]:
-    """Train, checkpointing to ``out_dir/checkpoint.pt``; returns the final record."""
+    """Train, resumable from ``out_dir/state.pt``; returns the final record.
+
+    Every ``save_every`` steps the whole state is written atomically: network, codes,
+    optimiser, schedule, step and both random generators. A run stopped for any reason (a flat
+    battery, a reclaimed cloud machine) continues from there when started again with the same
+    settings, and draws the same batches it would have drawn. ``stop_after`` stops early on
+    purpose; it exists for the test that proves this.
+    """
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     if subjects is None:
         split = manifest.get("split")
@@ -114,8 +123,38 @@ def train(
     history: list[dict[str, Any]] = []
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
+    first = 1
+    state_path = out_dir / "state.pt"
+    if state_path.exists():
+        saved = torch.load(state_path, map_location="cpu", weights_only=False)
+        if saved["train_config"] != asdict(config) or saved["subjects"] != list(subjects):
+            raise SystemExit(f"{state_path} is from a different run; move it to start afresh")
+        model.load_state_dict(saved["model"])
+        optimizer.load_state_dict(saved["optimizer"])
+        schedule.load_state_dict(saved["schedule"])
+        rng.bit_generator.state = saved["numpy_rng"]
+        torch.set_rng_state(saved["torch_rng"])
+        history = saved["history"]
+        first = int(saved["step"]) + 1
+        print(f"resuming at step {first}", flush=True)
 
-    for step in range(1, config.steps + 1):
+    def save_state(step: int) -> None:
+        payload = {
+            "step": step,
+            "train_config": asdict(config),
+            "subjects": list(subjects),
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "schedule": schedule.state_dict(),
+            "numpy_rng": rng.bit_generator.state,
+            "torch_rng": torch.get_rng_state(),
+            "history": history,
+        }
+        partial = state_path.with_suffix(".tmp")
+        torch.save(payload, partial)
+        partial.replace(state_path)
+
+    for step in range(first, config.steps + 1):
         chosen = torch.from_numpy(rng.choice(len(subjects), size=config.subjects_per_step))
         index = torch.from_numpy(
             rng.integers(
@@ -155,6 +194,10 @@ def train(
                 }
             history.append(record)
             print(json.dumps(record), flush=True)
+        if step % config.save_every == 0 or step == config.steps:
+            save_state(step)
+        if stop_after is not None and step >= stop_after:
+            return {"stopped_at": step}
 
     checkpoint = {
         "field_config": field_config.to_dict(),

@@ -149,6 +149,48 @@ class TestTheField:
         assert torch.cdist(codes, codes).max() > 0, "subjects need distinct codes"
 
 
+class TestResume:
+    """A stopped run continues exactly where it stopped (flat battery, reclaimed GPU)."""
+
+    def test_stop_and_resume_equals_one_uninterrupted_run(self, tmp_path) -> None:
+        """Same settings, same final network and codes, bit for bit, on the CPU."""
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(
+            steps=120,
+            subjects_per_step=2,
+            points_per_subject=512,
+            eval_every=60,
+            save_every=40,
+            seed=3,
+        )
+        field = FieldConfig(hidden=32, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        train(data_dir, tmp_path / "whole", config, field, device="cpu")
+        assert train(data_dir, tmp_path / "split", config, field, device="cpu", stop_after=50) == {
+            "stopped_at": 50
+        }
+        train(data_dir, tmp_path / "split", config, field, device="cpu")
+        whole = torch.load(tmp_path / "whole" / "checkpoint.pt", weights_only=False)
+        split = torch.load(tmp_path / "split" / "checkpoint.pt", weights_only=False)
+        assert torch.equal(whole["codes"], split["codes"])
+        assert all(torch.equal(whole["field"][k], split["field"][k]) for k in whole["field"])
+        assert [r["step"] for r in split["history"]] == [60, 120]
+
+    def test_a_state_from_other_settings_is_refused(self, tmp_path) -> None:
+        """Resuming with different settings would silently mix two runs; it stops instead."""
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        field = FieldConfig(hidden=32, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        small = TrainConfig(steps=40, subjects_per_step=2, points_per_subject=256, save_every=20)
+        train(data_dir, tmp_path / "run", small, field, device="cpu", stop_after=20)
+        with pytest.raises(SystemExit, match="different run"):
+            train(data_dir, tmp_path / "run", TrainConfig(steps=80), field, device="cpu")
+
+
 class TestEvaluation:
     """fields.evaluate: grids, meshes from labels, surface distance, held-out fitting."""
 
