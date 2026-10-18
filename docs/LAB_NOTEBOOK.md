@@ -818,3 +818,56 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Run 3 (`m2-h512-focus-prior`).** Run 2 plus a code prior 100× stronger (1e-2), to keep
     codes in a compact, smooth region that a new person's fit can reach. New flag
     `--code-prior`.
+
+## 2026-10-18 (13:05) — Level 2b M2: heart focus helps; fit trade-off found; part fields; paused
+
+- **Run 2 (`m2-h512-focus`): half of every step's points from the box around the heart.**
+  It beats run 1 on every heart structure and loses nothing on the lungs. Held-out, 26
+  subjects, after cleanup, mean / median mm:
+
+  | structure | run 1 | run 2 (focus) | Level 2a |
+  | --- | --- | --- | --- |
+  | LV | 1.50 / 1.45 | **1.32 / 1.22** | 0.89 / 0.82 |
+  | myocardium | 1.51 / 1.44 | **1.33 / 1.22** | 0.94 / 0.90 |
+  | RV | 2.04 / 1.87 | **1.83 / 1.67** | 1.24 / 1.20 |
+  | LA | 2.48 / 1.97 | **2.10 / 1.89** | 1.39 / 1.25 |
+  | RA | 2.42 / 2.06 | **2.14 / 1.90** | 1.60 / 1.43 |
+  | left lung | 3.61 / 2.88 | **3.25 / 2.48** | 3.80 / 3.58 |
+  | right lung | 3.93 / 2.74 | 3.44 / 2.91 | 4.71 / 4.05 |
+
+  The lungs stay ahead of 2a. The heart improves by 10–15%, but is still behind 2a.
+- **Weighted held-out fitting reveals a trade-off.** Run 1 was refitted with training's class
+  weights (`--fit-weighted`):
+  - the heart improves: LV 1.50 → 1.14, myocardium 1.51 → 1.22, RV 2.04 → 1.95 (means);
+  - the lungs get worse: 3.61 → 4.09 and 3.93 → 4.61.
+
+  One code cannot fit a new person's heart and lungs at once. Whatever the fit stresses
+  improves, at the other's cost. The 105 training thoraxes do not teach the single,
+  entangled code new combinations of heart and lungs.
+- **Response: part fields** (`fields.model.PartField`, `--parts heart. respiratory.`):
+  - each part has its own code and trunk;
+  - the trunks combine as a product of experts over one softmax, so non-overlap still holds
+    by construction;
+  - a test proves a part's code cannot move the other parts' decisions between their labels
+    and "nothing";
+  - for the product, "make the heart bigger" can then leave the lungs untouched.
+
+  19 tests pass.
+- **Runs in flight when the user paused:**
+  - **Run 3 (`m2-h512-focus-prior`, code prior 1e-2):** finished. Training accuracy 0.900
+    with code norm 0.98, against run 2's 5.4. Its held-out evaluation was running on the
+    Mac at the pause.
+  - **Run 4 (`m2-h512-focus-z128`, run 2 with a 128-number code):** stopped, resumable
+    from step 6000.
+  - **Run 5 (`m2-parts-h384`: parts, 2 × 64-number codes, hidden 384 per trunk, focus
+    0.5):** stopped, resumable from step 2000. It reached probe accuracy 0.672 at step
+    1000, the best of any run at that point.
+
+  Runs 4 and 5 have the same total code size, so together they separate "more code" from
+  "code split by part".
+- **Paused, $0 running.** VM `lagnav-2b-m2` ran 2.83 h and was deleted at 07:34 UTC after
+  every run was pulled to the Mac. The estimated cost is about $1 (see the ledger).
+- **To resume:**
+  1. New VM, same flags; upload code and data.
+  2. Copy back `runs/gpu/m2-h512-focus-z128/state.pt` and `runs/gpu/m2-parts-h384/state.pt`.
+  3. Start the same commands. Training continues from the saved step exactly.
