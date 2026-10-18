@@ -8,6 +8,7 @@ how every kind of answer is handled.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -347,3 +348,55 @@ class TestResize:
         assert result.commands == ["resize heart.left_ventricle +20%", "hide respiratory.lungs"]
         assert "heart.left_ventricle x1.2" in result.message
         assert not _visible(engine) & {"respiratory.left_lung", "respiratory.right_lung"}
+
+
+class TestTheUserKeyFile:
+    """The API key comes from a private file outside the repository, never from code or chat."""
+
+    def _file(self, tmp_path: Path, text: str, mode: int = 0o600) -> Path:
+        path = tmp_path / "anthropic.env"
+        path.write_text(text, encoding="utf-8")
+        path.chmod(mode)
+        return path
+
+    def test_allowed_names_are_loaded_and_values_never_returned(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Only the key and the switch are set; the return lists names only."""
+        from language.layer import load_user_env
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv(ENABLE_VARIABLE, raising=False)
+        monkeypatch.delenv("PATH_HIJACK", raising=False)
+        path = self._file(
+            tmp_path,
+            'export ANTHROPIC_API_KEY="test-not-a-real-key"\n'
+            "LAGNAV_LANGUAGE=claude\nPATH_HIJACK=x\n",
+        )
+        loaded = load_user_env(path)
+        assert sorted(loaded) == ["ANTHROPIC_API_KEY", ENABLE_VARIABLE]
+        assert os.environ["ANTHROPIC_API_KEY"] == "test-not-a-real-key"
+        assert "PATH_HIJACK" not in os.environ
+        assert all("test-not" not in name for name in loaded)
+
+    def test_the_environment_wins_over_the_file(self, tmp_path, monkeypatch) -> None:
+        """A shell can always override the file."""
+        from language.layer import load_user_env
+
+        monkeypatch.setenv(ENABLE_VARIABLE, "rules")
+        path = self._file(tmp_path, "LAGNAV_LANGUAGE=claude\n")
+        assert load_user_env(path) == [] and os.environ[ENABLE_VARIABLE] == "rules"
+
+    def test_a_file_others_can_read_is_refused(self, tmp_path) -> None:
+        """A key in a group- or world-readable file is not used."""
+        from language.layer import load_user_env
+
+        path = self._file(tmp_path, "ANTHROPIC_API_KEY=x\n", mode=0o644)
+        with pytest.raises(PermissionError, match="chmod 600"):
+            load_user_env(path)
+
+    def test_no_file_is_fine(self, tmp_path) -> None:
+        """Without the file nothing changes, and the rules path stays the default."""
+        from language.layer import load_user_env
+
+        assert load_user_env(tmp_path / "missing.env") == []

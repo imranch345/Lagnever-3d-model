@@ -31,7 +31,12 @@ from typing import Any
 from awr.config import load_domain_config
 from awr.schema import Transform
 from editing.operations import SetTransform
-from language.layer import LanguageLayer, Translator, translator_from_environment
+from language.layer import (
+    LanguageLayer,
+    Translator,
+    load_user_env,
+    translator_from_environment,
+)
 from reasoning.command_engine import CommandEngine
 from viewer.state import scene_state
 
@@ -401,6 +406,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="joint shape model (shapes.build) to draw generated thoraxes from",
     )
     args = parser.parse_args(argv)
+    loaded = load_user_env()
+    if loaded:
+        print(f"Loaded from ~/.lagnav/anthropic.env: {', '.join(sorted(loaded))}", flush=True)
     app = build_app(args.scene, args.model)
     server = make_server(app, args.port)
     print(f"Lagnav viewer on http://127.0.0.1:{server.server_address[1]}/", flush=True)

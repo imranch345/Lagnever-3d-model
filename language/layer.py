@@ -23,6 +23,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from awr.ontology import AnatomyOntology
@@ -36,6 +37,7 @@ __all__ = [
     "LanguageResult",
     "ResizeHook",
     "Translator",
+    "load_user_env",
     "parse_resize",
     "translator_from_environment",
 ]
@@ -97,6 +99,34 @@ class LanguageResult:
     commands: list[str] = field(default_factory=list)
     #: Engine operations applied (``CommandResponse.operation``), e.g. "reset_view".
     operations: list[str] = field(default_factory=list)
+
+
+#: Where the user keeps the API key: outside the repository, readable only by them.
+USER_ENV_FILE = Path.home() / ".lagnav" / "anthropic.env"
+#: The only variables that file may set.
+_USER_ENV_KEYS = frozenset({"ANTHROPIC_API_KEY", ENABLE_VARIABLE})
+
+
+def load_user_env(path: Path = USER_ENV_FILE) -> list[str]:
+    """Set the allowed variables from the user's key file; return their names, never values.
+
+    Lines are ``NAME=value``. Variables already in the environment win, so a shell can always
+    override the file. Unknown names are ignored. If the key file can be read by the group or by
+    others, it is refused, so a key is not used from a file anyone else could read.
+    """
+    if not path.is_file():
+        return []
+    if path.stat().st_mode & 0o077:
+        raise PermissionError(f"{path} is readable by others; run: chmod 600 {path}")
+    loaded: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name, sep, value = line.strip().partition("=")
+        name, value = name.strip().removeprefix("export ").strip(), value.strip().strip("\"'")
+        if not sep or name not in _USER_ENV_KEYS or not value or name in os.environ:
+            continue
+        os.environ[name] = value
+        loaded.append(name)
+    return loaded
 
 
 def translator_from_environment(ontology: AnatomyOntology) -> Translator | None:

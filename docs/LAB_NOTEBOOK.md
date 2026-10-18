@@ -627,3 +627,29 @@ data); code at `8fc2d04` + `f1bdcd4`.
   candidate Step 23 narrows (0, 400] and compares them. It is to be preregistered first.
 - **Evidence:** `docs/STEP_22_MIRROR_REPORT.md`, `experiments/runs/step22/summary.json`,
   README research table, RESULTS R8.
+
+## 2026-10-18 — Level 2b begins: the user's decisions, and the plan
+
+- **The user's decisions:**
+  - **USD 700** of cloud GPU budget;
+  - the Claude API is available;
+  - investors later: make the product stronger first.
+- **Hardware here:** Apple M2 with an 8-core GPU (PyTorch MPS works), 16 GB RAM, 21 GB free
+  disk. Development runs on this Mac at no cost, and the GPU budget is spent only on full
+  training runs.
+- **Plan** (`docs/LEVEL_2B_PLAN.md`). A neural field labels every 3D point with exactly one
+  structure. Structures then cannot overlap, by construction, so a growing structure must
+  push its neighbours aside.
+  - **Measured against Level 2a** on the same held-out 26 subjects:
+    - held-out fit no worse;
+    - at least 90% of samples valid, without filtering, at real-person novelty;
+    - LV growth of at least +15% on s0029, against 2a's +2%.
+  - **Milestones with hard caps:** M1 $0 (Mac), M2 ≤ $50, M3 ≤ $100, M4 ≤ $300, and a $250
+    reserve. Every session goes in `docs/LEVEL_2B_SPEND.md`.
+- **The Claude key is kept out of chat and out of the repository.** The viewer and dashboard
+  read `~/.lagnav/anthropic.env`, which the user creates. The loader:
+  - refuses a file others can read;
+  - sets only the key and the language switch;
+  - lets the shell override the file;
+  - reports variable names, never values.
+  Tested.
