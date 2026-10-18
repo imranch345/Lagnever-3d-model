@@ -40,6 +40,7 @@ __all__ = [
     "class_weights",
     "focus_points",
     "load_points",
+    "part_indices",
     "train",
     "weights_from_counts",
 ]
@@ -278,6 +279,20 @@ def train(
     return history[-1]
 
 
+def part_indices(data_dir: Path, prefixes: Sequence[str]) -> tuple[int, ...]:
+    """For classes 1..K of the data, the index of the first prefix each name starts with."""
+    if not prefixes:
+        return ()
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    part_of = []
+    for name in manifest["classes"][1:]:
+        matches = [i for i, prefix in enumerate(prefixes) if name.startswith(prefix)]
+        if not matches:
+            raise SystemExit(f"class {name} matches none of the parts {list(prefixes)}")
+        part_of.append(matches[0])
+    return tuple(part_of)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Train from the command line."""
     parser = argparse.ArgumentParser(description="Train the Level 2b label field.")
@@ -299,6 +314,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--tf32", action="store_true", help="TensorFloat-32 matmuls on CUDA")
+    parser.add_argument(
+        "--parts",
+        nargs="*",
+        default=[],
+        help="class-name prefixes, one per part with its own code (e.g. heart. respiratory.)",
+    )
     parser.add_argument("--focus-fraction", type=float, default=TrainConfig.focus_fraction)
     parser.add_argument("--focus-margin", type=float, default=TrainConfig.focus_margin_mm)
     args = parser.parse_args(argv)
@@ -317,7 +338,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         focus_margin_mm=args.focus_margin,
     )
     field = FieldConfig(
-        hidden=args.hidden, layers=args.layers, latent_dim=args.latent, bands=args.bands
+        hidden=args.hidden,
+        layers=args.layers,
+        latent_dim=args.latent,
+        bands=args.bands,
+        part_of=part_indices(args.data, args.parts),
     )
     final = train(args.data, args.out, config, field, device=args.device, tf32=args.tf32)
     print(f"final: {json.dumps(final)}")

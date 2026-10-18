@@ -49,7 +49,7 @@ from scipy import ndimage  # type: ignore[import-untyped]
 from skimage import measure
 from torch.nn import functional
 
-from fields.model import FieldConfig, LabelField, pick_device
+from fields.model import Field, FieldConfig, make_field, pick_device
 from fields.train import weights_from_counts
 from shapes.register import load_scene
 
@@ -83,10 +83,12 @@ class Grid:
         return mesh.reshape(-1, 3).astype(np.float32)
 
 
-def load_checkpoint(path: Path, device: torch.device) -> tuple[LabelField, dict[str, Any]]:
+def load_checkpoint(path: Path, device: torch.device) -> tuple[Field, dict[str, Any]]:
     """The trained field on ``device``, and the checkpoint's other contents."""
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    field = LabelField(FieldConfig(**checkpoint["field_config"]))
+    config = dict(checkpoint["field_config"])
+    config["part_of"] = tuple(config.get("part_of", ()))
+    field = make_field(FieldConfig(**config))
     field.load_state_dict(checkpoint["field"])
     field.to(device).eval()
     for parameter in field.parameters():
@@ -95,7 +97,7 @@ def load_checkpoint(path: Path, device: torch.device) -> tuple[LabelField, dict[
 
 
 def fit_code(
-    field: LabelField,
+    field: Field,
     points: npt.ArrayLike,
     labels: npt.ArrayLike,
     *,
@@ -111,7 +113,7 @@ def fit_code(
     generator = np.random.default_rng(seed)
     points_t = torch.as_tensor(np.asarray(points), dtype=torch.float32)
     labels_t = torch.as_tensor(np.asarray(labels), dtype=torch.int64)
-    code = torch.zeros(1, field.config.latent_dim, device=device, requires_grad=True)
+    code = torch.zeros(1, field.config.code_dim, device=device, requires_grad=True)
     optimizer = torch.optim.Adam([code], lr=lr)
     for _ in range(steps):
         index = torch.from_numpy(generator.integers(len(points_t), size=batch))
@@ -127,7 +129,7 @@ def fit_code(
 
 
 @torch.no_grad()
-def decode(field: LabelField, code: torch.Tensor, grid: Grid, chunk: int = 65536) -> np.ndarray:
+def decode(field: Field, code: torch.Tensor, grid: Grid, chunk: int = 65536) -> np.ndarray:
     """The most likely label at every grid point, as a (X, Y, Z) uint8 volume."""
     device = next(field.parameters()).device
     points = torch.from_numpy(grid.points())
@@ -139,9 +141,7 @@ def decode(field: LabelField, code: torch.Tensor, grid: Grid, chunk: int = 65536
 
 
 @torch.no_grad()
-def decode_margins(
-    field: LabelField, code: torch.Tensor, grid: Grid, chunk: int = 65536
-) -> np.ndarray:
+def decode_margins(field: Field, code: torch.Tensor, grid: Grid, chunk: int = 65536) -> np.ndarray:
     """Per class k, logit k minus the best other logit, as a (classes, X, Y, Z) float32 array.
 
     Positive exactly where k is the most likely label (``decode``'s argmax), zero where it ties

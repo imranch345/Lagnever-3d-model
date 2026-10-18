@@ -120,6 +120,32 @@ class TestTheField:
         assert logits.shape == (2, 10, 8)
         assert logits.argmax(-1).shape == (2, 10)
 
+    def test_a_part_code_leaves_the_other_parts_decisions_alone(self) -> None:
+        """Changing the heart's code cannot move 'lung vs nothing'; one label per point holds."""
+        from fields.model import AutoDecoder, FieldConfig, PartField
+
+        torch.manual_seed(0)
+        config = FieldConfig(n_classes=5, hidden=32, layers=4, latent_dim=8, part_of=(0, 1, 0, 1))
+        field = PartField(config)
+        points = torch.randn(1, 200, 3) * 50
+        heart, lungs = torch.randn(1, 8), torch.randn(1, 8)
+        before = field(points, torch.cat([heart, lungs], -1))
+        after = field(points, torch.cat([torch.randn(1, 8), lungs], -1))
+        assert before.shape == (1, 200, 5)
+        for k in (2, 4):  # part 1's classes against "nothing"
+            assert torch.allclose(before[..., k] - before[..., 0], after[..., k] - after[..., 0])
+        assert not torch.allclose(before[..., 1], after[..., 1])
+        assert AutoDecoder(3, config).codes.weight.shape == (3, 16)
+
+    def test_parts_must_cover_every_class(self) -> None:
+        """A part map of the wrong length, or an empty part, is refused."""
+        from fields.model import FieldConfig, PartField
+
+        with pytest.raises(ValueError, match="one part index"):
+            PartField(FieldConfig(n_classes=5, part_of=(0, 1)))
+        with pytest.raises(ValueError, match="at least one class"):
+            PartField(FieldConfig(n_classes=3, part_of=(0, 2)))
+
     def test_class_weights_favour_rare_classes(self) -> None:
         """Rarer classes weigh more; the mean weight is 1; absent classes get 1."""
         from fields.train import class_weights
@@ -296,6 +322,25 @@ class TestEvaluation:
         labels = decode(field, code, grid)
         assert np.array_equal(margins.argmax(axis=0), labels)
         assert ((margins > 0).sum(axis=0) <= 1).all()
+
+    def test_a_part_field_learns_and_reloads(self, tmp_path) -> None:
+        """Two parts learn the spheres; the checkpoint reloads and fits a whole code."""
+        from fields.evaluate import fit_code, load_checkpoint
+        from fields.model import FieldConfig, PartField
+        from fields.train import TrainConfig, part_indices, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(steps=400, subjects_per_step=4, points_per_subject=2048, seed=0)
+        part_of = part_indices(data_dir, ["a", "b"])
+        assert part_of == (0, 1)
+        field = FieldConfig(
+            hidden=48, layers=4, latent_dim=8, bands=4, scale_mm=60.0, part_of=part_of
+        )
+        assert train(data_dir, tmp_path / "run", config, field, device="cpu")["accuracy"] > 0.9
+        model, _ = load_checkpoint(tmp_path / "run" / "checkpoint.pt", torch.device("cpu"))
+        assert isinstance(model, PartField)
+        held = np.load(data_dir / "points" / "t0.npz")
+        assert fit_code(model, held["points"], held["labels"], steps=5, batch=256).shape == (1, 16)
 
     def test_a_held_out_subject_is_fitted_with_the_network_frozen(self, tmp_path) -> None:
         """Fitting a new code lowers the loss, and the network's weights do not move."""
