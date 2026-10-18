@@ -9,7 +9,8 @@ provider's own billing figures. A cap is a hard stop.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | – | – | – | – | 0.00 | – | nothing spent yet | **0.00** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 2.83 (04:44–07:34 UTC) | ~1.00 (estimate; billing figure to replace it) | M2 | VM `lagnav-2b-m2`: benchmark and five training runs; deleted when the user paused | **~1.00** |
-| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | running since 14:05 UTC | pending | M2 | VM `lagnav-2b-m2` (second session): resume runs 4 and 5, then run 6 | pending |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.43 (14:05–14:31 UTC) | ~0.15 (estimate) | M2 | second session: runs 4 and 5 resumed; **preempted** by Google at 14:31, VM deleted by its termination action | **~1.15** |
+| 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | running since 14:36 UTC | pending | M2 | third session, after the user chose spot again: resume runs 4 (step 12000) and 5 (step 6000), then run 6 | pending |
 
 ## Sessions
 
@@ -42,3 +43,11 @@ provider's own billing figures. A cap is a hard stop.
   in us-east1-b, where the project's L4 quota also applies.
 - **Same machine and safeguards as the first session:** 6 h auto-delete, no service account
   or scopes, instance-only SSH key, and checkpoints pulled to the Mac every 4 minutes.
+- **Preempted at 14:31 UTC** (`compute.instances.preempted`), after 26 minutes. The
+  termination action deleted the VM, so nothing was left billing. The Mac's last pull, at
+  14:27, held run 4 at step 12,000 and run 5 at step 6,000; run 5 lost about 1000 steps.
+- **The user was asked again,** with spot (~$0.6–1.1 for the remaining ~2.5 h) and on-demand
+  (~$2–2.5, never reclaimed) as the options. They chose spot.
+- **Third VM** created at 14:36 UTC in us-central1-c. Five zones had no spot L4 capacity
+  first: us-east1-b/c/d and us-central1-a/b. Both runs resumed from their saved steps. Launch,
+  upload and resume are now one script, so a further preemption costs minutes.
