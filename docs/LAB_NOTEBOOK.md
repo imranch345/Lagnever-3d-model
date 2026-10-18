@@ -544,3 +544,86 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Evidence:** `docs/STEP_21_BASIN_ENTRY_REPORT.md` and
   `experiments/runs/step21/summary.json`. The README research table and RESULTS R7 are
   updated.
+
+## 2026-10-16 (23:50) to 2026-10-17 (00:10) — Step 22 preregistered, coded, tested and started
+
+- **Question.** Step 21 fixed seed 9's escape at initialisation. Is the *non*-escape of seed 5
+  fixed too? And is a seed's outcome its weights or its data order, the question Step 15 left
+  open?
+- **Preregistration** (`docs/STEP_22_MIRROR_PLAN.md`, PR #10), written before any code:
+  - **Arm 1:** seed 5 from step 0, under the eight orderings that all escaped from seed 9's
+    step 0;
+  - **Arm 2:** a crossed swap (seed 5's weights with seed 9's batch order, and the reverse),
+    with identity controls;
+  - **decision rule:** A′ (both modes fixed), B′ (order rescues seed 5), C′ (the original
+    order was the accident) or invalid;
+  - **four predictions**, including "Arm 1 = none, all stuck".
+- **Checked before code.** Step 16 ran at 4 threads, so seed 5's frozen trajectory can be
+  reproduced bit-exactly. The data loader is seeded with the run seed, so loader seed *s*
+  from step 0 is run *s*'s batch order. The model's own random draws follow the weights'
+  seed: the swap is batch order only.
+- **Code.** Steps 20 and 21 gained a seed parameter that defaults to 9, so nothing earlier
+  changed. Their tests pass unchanged. `experiments/step22/mirror.py` and 24 tests, including
+  a test that the swap changes the first batch to the other seed's and keeps the weights.
+- **Full suite: 1232 passed** (5 skipped: asset tests without their extra). The frozen
+  checksums were 182/182 before the start.
+- **Started at 00:10:** capture of seed 5 to step 800, then 14 continuations, then the
+  Stage 2 gate.
+- **Housekeeping.** Free disk is down to 8.7 GB, from 40+ GB on 2026-10-12. Step 22 needs
+  about 0.2 GB, so it is safe against its 2 GiB stop condition, but the machine is getting
+  full.
+- **00:20, capture valid.** Seed 5 reproduces its frozen Step 16 trajectory exactly at **17 of
+  17** shared checkpoints (0–800), and its step-0 state differs from seed 9's.
+- **00:20, first launch failed, then fixed.**
+  - **Symptom.** Every continuation exited at once, refused by the runner's own
+    declared-run check.
+  - **Cause.** The check keyed runs by name alone, and `branch_05` exists at points 0, 400 and
+    800, so the point-800 entry shadowed point 0.
+  - **Why the tests missed it.** They had checked that a wrong run is refused, not that every
+    right run is accepted.
+  - **Fix** (`3ffb62f`). Whole runs are compared, with tests for all 32 declared runs.
+  - **Impact.** No continuation produced a result, and the capture is unaffected. Recorded in
+    `sweep.log` ("=== STOPPED ...", "=== RESUMED ...").
+- **00:21, continuations running.** 14 at most 3 at a time, about 4 h.
+- **2026-10-17, interruption.**
+  - **What stopped.** Runs stopped at about 02:53. Branches 05–07 were near step 830 of 1200.
+  - **Restart.** The machine restarted at about 15:14 and was on battery: 7% at 21:20, with
+    an "early" battery warning.
+  - **Kept.** Six results completed before the stop: the reference and branches 00–04.
+  - **Resume.** A watcher resumes the chain only once the machine is on AC power. Interrupted
+    runs restart from the saved step-0 state, as in Step 21, and completed results are kept.
+
+## 2026-10-18 — Step 22 complete: decision B′, order can rescue a non-escaper
+
+- **Run.** The chain resumed on AC power at 21:19 on 2026-10-17. Arms 1 and 2 finished, the
+  gate found Arm 1 split, so Stage 2 (400 and 800) ran as fixed in the plan.
+  `CHAIN EXITED` came before 05:42 on 2026-10-18.
+- **Integrity, all clean:**
+  - capture 17/17, and references 25/25, 17/17 and 9/9 against frozen seed 5;
+  - both identity controls exactly equal their references;
+  - one starting state and 8 distinct orderings at 0, 400 and 800;
+  - the replay is identical;
+  - **182/182** frozen checksums before and after.
+- **Arm 1** (seed 5 from step 0): **1/8 escape**. Loader 2006 escapes at step 950 and ends
+  at 21.06° with usage 2.37°, a full escape. Loader 2007 is in transition (0.615°). Six are
+  stuck. Verdict: **split**.
+- **Stage 2:** from 400, 0/8; from 800, 0/8. Every branch is stuck, including ordering
+  2006. **Seed 5's non-escape is sealed in (0, 400].**
+- **Swap:**
+  - seed 9's weights with seed 5's order escape at 750, 85 steps earlier than with their
+    own order;
+  - seed 5's weights with seed 9's order stay stuck.
+  The outcome follows the weights in both directions.
+- **Decision B′.** H18 is supported for seed 5; H17 is not.
+- **Predictions:**
+  - 1 confirmed;
+  - **2 was wrong**: "none" was expected and the result is split;
+  - 3 confirmed;
+  - 4 confirmed: the one escape is late, at 950.
+- **Meaning.** The initial weights bias the outcome strongly in both seeds, but the bias is
+  absolute only for seed 9, under the orderings tried. Seed 5's outcome is sealed within its
+  first 400 steps.
+- **Next.** For the first time, branches that share a start and differ in outcome exist. A
+  candidate Step 23 narrows (0, 400] and compares them. It is to be preregistered first.
+- **Evidence:** `docs/STEP_22_MIRROR_REPORT.md`, `experiments/runs/step22/summary.json`,
+  README research table, RESULTS R8.

@@ -133,11 +133,11 @@ Step 7 rebuilt the data so the question is answerable, and found four further de
 the same kind before any conclusion could be drawn. The details are in
 [docs/step7/02_preregistration_amendments.md](docs/step7/02_preregistration_amendments.md).
 
-### Steps 11 to 21, in one table
+### Steps 11 to 22, in one table
 
 Step 10 left a gap. A lookup keyed on entity identity **and** the relationship graph reaches
 11.57° of rotation error on `test_seen`; A3, reading the same inputs, reaches 21.38°. Steps
-11 to 21 asked where that relational information is lost.
+11 to 22 asked where that relational information is lost.
 
 | step | question | answer |
 | --- | --- | --- |
@@ -152,6 +152,7 @@ Step 10 left a gap. A lookup keyed on entity identity **and** the relationship g
 | [19](docs/STEP_19_GRADIENT_DIRECTION_REPORT.md) | Does the gradient's direction change first? | No. Successive gradients stay aligned at +0.844 and nearly orthogonal to the net displacement. |
 | [20](docs/STEP_20_CHECKPOINT_BRANCHING_REPORT.md) | From seed 9's step-805 state, does data ordering decide the outcome? | No. All 8 branches escape, at steps 830–840, to a final rotation of 20.988° ± 0.023°. |
 | [21](docs/STEP_21_BASIN_ENTRY_REPORT.md) | How early is the outcome fixed? Branching at 700, 600, 400, 200 and 0 | **From initialisation.** 48 of 48 branches escape, including all 8 from step 0. Ordering moves the escape between steps 700 and 865, but never stops it. |
+| [22](docs/STEP_22_MIRROR_REPORT.md) | Is a non-escaper (seed 5) fixed too, and is it weights or order? | **Not at initialisation.** 1 of 8 orderings rescues seed 5 (escape at 950), but none from step 400 or 800: its non-escape is sealed in (0, 400]. Swapping batch orders between seeds 5 and 9 leaves each outcome with its weights. |
 
 Two things follow. Every architectural and objective explanation tested has been ruled out,
 and the escape is already fixed in the model's state before any trajectory measurement sees
@@ -159,9 +160,9 @@ it coming. And escape is not the whole gap: on validation a graph-using seed sti
 21° against the lookup's 12.24°, and A3, averaged over three seeds, captures 15.2% of the
 available relational improvement.
 
-**Next, not started:** Step 22 branches a non-escaping seed (seed 5) at step 0. If its
-outcome is fixed from initialisation too, both modes are set by the starting weights, and
-the question becomes what distinguishes the two starts (Step 21 report, §8).
+**Next, not started:** Step 23 would narrow seed 5's window (0, 400] by branching at 100,
+200 and 300. It would then compare the escaping and stuck branches that share one start, the
+first controlled contrast in this programme (Step 22 report, §6).
 
 ### Step 10, in one table
 
