@@ -7,7 +7,13 @@ therefore ``factor``³ times the current one.
 is differentiable in the code. The code is optimised towards the target, with a prior keeping
 it near where it started:
 
-    loss = (V(z) / V_target − 1)² + prior · mean((z − z₀)²)
+    loss = (V(z) / V_target − 1)² + prior · mean((z − z₀)²) + plausibility · M(z)
+
+``M`` is the squared Mahalanobis distance of the moving code under a Gaussian fitted to the
+training subjects' codes, per moving dimension. The plain prior keeps the code *near where it
+started*; ``M`` keeps it *among real thoraxes*. Moving along directions in which real people
+differ (heart size, say) costs little; moving along directions no training subject shows
+(a chamber splitting in two) costs a lot.
 
 With a part field, only the structure's own part of the code moves; the other parts keep
 theirs. Neighbours change only as much as the field couples them, which is how the training
@@ -101,6 +107,8 @@ def resize_code(
     margin_mm: float = 30.0,
     spacing_mm: float = 3.0,
     chunk: int = 32768,
+    plausibility: float = 0.0,
+    codes: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """A code whose structure ``index`` has ``factor``³ its starting soft volume, if it can."""
     device = start.device
@@ -115,6 +123,17 @@ def resize_code(
         moving[part * config.latent_dim : (part + 1) * config.latent_dim] = True
     else:
         moving[:] = True
+    precision = mean = None
+    if plausibility > 0:
+        if codes is None:
+            raise ValueError("plausibility needs the training codes")
+        sub = codes.to(device)[:, moving].double()
+        mean = sub.mean(dim=0)
+        centred = sub - mean
+        covariance = centred.T @ centred / max(len(sub) - 1, 1)
+        covariance += 1e-6 * covariance.diagonal().mean() * torch.eye(len(mean), device=device)
+        precision = torch.linalg.inv(covariance).float()
+        mean = mean.float()
     delta = torch.zeros_like(start, requires_grad=True)
     optimizer = torch.optim.Adam([delta], lr=lr)
     volume = before
@@ -127,6 +146,9 @@ def resize_code(
         weight = 2.0 * (volume / target - 1.0) / target
         soft_volume(field, code, points, index, voxel_ml, chunk, weight=weight)
         penalty = prior * (delta * moving).pow(2).sum() / moving.sum()
+        if precision is not None and mean is not None:
+            away = (start + delta * moving)[0, moving] - mean
+            penalty = penalty + plausibility * (away @ precision @ away) / moving.sum()
         penalty.backward()
         assert delta.grad is not None and code.grad is not None
         delta.grad += code.grad * moving
@@ -171,9 +193,12 @@ def _attempt(
     limits: dict[str, Any],
     ontology: AnatomyOntology,
     options: dict[str, Any],
+    codes: torch.Tensor,
 ) -> ResizeResult:
     index = classes.index(entity) + 1
-    code, soft = resize_code(field, start, index, 1 + percent / 100, grid, start_labels, **options)
+    code, soft = resize_code(
+        field, start, index, 1 + percent / 100, grid, start_labels, codes=codes, **options
+    )
     thorax = decode_thorax(field, code, grid, classes)
     failures = judge(thorax.measures, limits["volume_ml"], limits["stray"], ontology)
     volume = thorax.measures["volume_ml"][entity]
@@ -235,6 +260,7 @@ def largest_change(
             limits,
             ontology,
             options,
+            ck["codes"],
         )
         verdict = "passes" if result.passes else result.failures[0]
         print(
@@ -285,6 +311,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--percent", type=int, default=15)
     parser.add_argument("--steps", type=int, default=120)
     parser.add_argument("--prior", type=float, default=1.0)
+    parser.add_argument(
+        "--plausibility", type=float, default=0.0, help="weight of the Mahalanobis prior"
+    )
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -296,7 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.entity,
         args.percent,
         device=args.device,
-        options={"steps": args.steps, "prior": args.prior},
+        options={"steps": args.steps, "prior": args.prior, "plausibility": args.plausibility},
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")

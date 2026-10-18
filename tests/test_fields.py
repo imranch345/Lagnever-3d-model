@@ -520,3 +520,36 @@ class TestResize:
         assert inside == limits
         outside = baseline_limits(limits, {"volume_ml": {"lv": 250.0}, "stray": {"lv": 0.10}})
         assert outside == {"volume_ml": {"lv": (60.0, 250.0)}, "stray": {"lv": 0.10}}
+
+    def test_the_plausibility_prior_needs_codes_and_holds_the_code_back(self, tmp_path) -> None:
+        """A strong Mahalanobis prior keeps the code nearer the population than none does."""
+        from fields.evaluate import Grid, decode, load_checkpoint
+        from fields.model import FieldConfig
+        from fields.resize import resize_code
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(steps=300, subjects_per_step=4, points_per_subject=2048, seed=0)
+        field = FieldConfig(hidden=48, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        train(data_dir, tmp_path / "run", config, field, device="cpu")
+        model, checkpoint = load_checkpoint(tmp_path / "run" / "checkpoint.pt", torch.device("cpu"))
+        grid = Grid([-60, -60, -60], [60, 60, 60], 3.0)
+        start = checkpoint["codes"][1:2]
+        labels = decode(model, start, grid)
+        common = {"steps": 40, "lr": 5e-2, "prior": 0.0, "margin_mm": 15}
+        with pytest.raises(ValueError, match="training codes"):
+            resize_code(model, start, 1, 1.3, grid, labels, plausibility=1.0, **common)
+        free, _ = resize_code(model, start, 1, 1.3, grid, labels, **common)
+        held, _ = resize_code(
+            model,
+            start,
+            1,
+            1.3,
+            grid,
+            labels,
+            plausibility=100.0,
+            codes=checkpoint["codes"],
+            **common,
+        )
+        mean = checkpoint["codes"].mean(0)
+        assert (held - mean).norm() < (free - mean).norm()
