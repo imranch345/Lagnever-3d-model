@@ -218,6 +218,37 @@ class TestEvaluation:
         assert surface_distance(ball, ball) < 0.2
         assert 0.8 < surface_distance(ball, moved) < 2.2
 
+    def test_margin_meshing_beats_the_voxel_staircase(self) -> None:
+        """On a coarse grid, the margin's zero level finds a ball's surface better than its mask."""
+        from fields.evaluate import Grid, label_meshes
+
+        grid = Grid([-30, -30, -30], [30, 30, 30], 3.0)
+        radius = np.linalg.norm(grid.points(), axis=1).reshape(grid.shape)
+        volume = (radius < 20).astype(np.uint8)
+        margins = np.stack([radius - 20, 20 - radius]).astype(np.float32)
+        binary = label_meshes(volume, grid, ["ball"])["ball"]
+        smooth = label_meshes(volume, grid, ["ball"], margins)["ball"]
+
+        def error(mesh) -> float:
+            return float(np.abs(np.linalg.norm(mesh.vertices, axis=1) - 20).mean())
+
+        assert error(smooth) < 0.1 < error(binary)
+        assert abs(smooth.volume / (4 / 3 * np.pi * 20**3) - 1) < 0.02
+
+    def test_margins_agree_with_labels(self, tmp_path) -> None:
+        """Each point's positive margin is its argmax label, and only one class is positive."""
+        from fields.evaluate import Grid, decode, decode_margins
+        from fields.model import FieldConfig, LabelField
+
+        torch.manual_seed(0)
+        field = LabelField(FieldConfig(n_classes=4, hidden=32, layers=4, latent_dim=8))
+        code = torch.randn(1, 8)
+        grid = Grid([-50, -50, -50], [50, 50, 50], 10.0)
+        margins = decode_margins(field, code, grid, chunk=100)
+        labels = decode(field, code, grid)
+        assert np.array_equal(margins.argmax(axis=0), labels)
+        assert ((margins > 0).sum(axis=0) <= 1).all()
+
     def test_a_held_out_subject_is_fitted_with_the_network_frozen(self, tmp_path) -> None:
         """Fitting a new code lowers the loss, and the network's weights do not move."""
         from torch.nn import functional

@@ -4,10 +4,15 @@ For each held-out subject:
 
 1. **Fit.** A fresh code is optimised on the subject's labelled points, with the network
    frozen (auto-decoder test-time fitting, ``fit_steps`` Adam steps).
-2. **Decode.** The field is labelled on a grid (``spacing_mm``) over the training points'
-   extent, and marching cubes gives one mesh per structure.
+2. **Decode.** The field is evaluated on a grid (``spacing_mm``) over the training points'
+   extent. Each structure is meshed two ways:
+   - **binary:** marching cubes on its label mask, the M1 method;
+   - **smooth:** marching cubes at 0 on its margin, its logit minus the best other logit.
+     The margin is positive exactly where the structure is the most likely label, so the
+     smooth surfaces bound the same regions as the labels, without the voxel staircase.
 3. **Compare** with the subject's real Level 1 meshes, moved by the same rigid alignment:
-   - symmetric mean surface distance in millimetres (both directions, averaged);
+   - symmetric mean surface distance in millimetres (both directions, averaged), for both
+     meshings;
    - Dice on the subject's labelled points.
 
 Level 2a is measured the same way: each held-out subject's registered shape is reconstructed by
@@ -41,6 +46,7 @@ from shapes.register import load_scene
 __all__ = [
     "Grid",
     "decode",
+    "decode_margins",
     "fit_code",
     "label_meshes",
     "load_checkpoint",
@@ -121,16 +127,51 @@ def decode(field: LabelField, code: torch.Tensor, grid: Grid, chunk: int = 65536
     return labels.numpy().reshape(grid.shape)
 
 
+@torch.no_grad()
+def decode_margins(
+    field: LabelField, code: torch.Tensor, grid: Grid, chunk: int = 65536
+) -> np.ndarray:
+    """Per class k, logit k minus the best other logit, as a (classes, X, Y, Z) float32 array.
+
+    Positive exactly where k is the most likely label (``decode``'s argmax), zero where it ties
+    with the runner-up. Classes therefore never claim the same point here either.
+    """
+    device = next(field.parameters()).device
+    points = torch.from_numpy(grid.points())
+    n_classes = field.config.n_classes
+    margins = torch.empty(n_classes, len(points), dtype=torch.float32)
+    classes = torch.arange(n_classes, device=device)
+    for start in range(0, len(points), chunk):
+        part = points[start : start + chunk].unsqueeze(0).to(device)
+        logits = field(part, code.to(device))[0]
+        top = logits.topk(2, dim=-1)
+        is_best = top.indices[:, :1] == classes
+        other = torch.where(is_best, top.values[:, 1:2], top.values[:, :1])
+        margins[:, start : start + chunk] = (logits - other).T.to("cpu")
+    return margins.numpy().reshape(n_classes, *grid.shape)
+
+
 def label_meshes(
-    volume: np.ndarray, grid: Grid, classes: Sequence[str]
+    volume: np.ndarray,
+    grid: Grid,
+    classes: Sequence[str],
+    margins: np.ndarray | None = None,
 ) -> dict[str, trimesh.Trimesh]:
-    """One mesh per structure present (class 1..K), in the aligned frame."""
+    """One mesh per structure present (class 1..K), in the aligned frame.
+
+    With ``margins`` (from ``decode_margins``) the surface is the margin's zero level, found to
+    sub-voxel precision; without, it is the label mask's boundary.
+    """
     meshes: dict[str, trimesh.Trimesh] = {}
     for index, entity in enumerate(classes, start=1):
         mask = np.pad(volume == index, 1)
         if mask.sum() < 8:
             continue
-        vertices, faces, _, _ = measure.marching_cubes(mask.astype(np.float32), 0.5)
+        if margins is None:
+            values, level = mask.astype(np.float32), 0.5
+        else:
+            values, level = np.pad(margins[index], 1, constant_values=-1.0), 0.0
+        vertices, faces, _, _ = measure.marching_cubes(values, level)
         vertices = (vertices - 1.0) * grid.spacing + grid.low
         mesh = trimesh.Trimesh(vertices, faces, process=False)
         # Marching cubes on an inside-high mask winds faces inward; Level 1 fixes them the same way.
@@ -200,8 +241,10 @@ def evaluate(
         points, labels = stored["points"], stored["labels"]
         rigid = np.asarray(manifest["stats"][subject]["frame"]["rigid"], dtype=np.float64)
         code = fit_code(field, points, labels, steps=fit_steps)
-        volume = decode(field, code, grid)
+        margins = decode_margins(field, code, grid)
+        volume = margins.argmax(axis=0).astype(np.uint8)
         meshes = label_meshes(volume, grid, classes)
+        smooth = label_meshes(volume, grid, classes, margins)
         real = _real_meshes(scenes_root, subject, rigid)
         predicted = (
             field(
@@ -216,6 +259,9 @@ def evaluate(
             row: dict[str, Any] = {"dice_points": _dice(predicted, labels[:50000], index)}
             if entity in meshes and entity in real:
                 row["surface_mm_2b"] = round(surface_distance(meshes[entity], real[entity]), 3)
+                row["surface_mm_2b_smooth"] = round(
+                    surface_distance(smooth[entity], real[entity]), 3
+                )
             if models_2a is not None and entity in models_2a and entity in real:
                 rebuilt = models_2a[entity](subject)
                 if rebuilt is not None:
@@ -262,7 +308,7 @@ def _summary(results: Mapping[str, Any], classes: Sequence[str]) -> dict[str, An
         rows = [r[entity] for r in results.values() if entity in r]
         summary[entity] = {
             key: round(float(np.mean(values)), 3) if values else None
-            for key in ("surface_mm_2b", "surface_mm_2a", "dice_points")
+            for key in ("surface_mm_2b", "surface_mm_2b_smooth", "surface_mm_2a", "dice_points")
             if (values := [row[key] for row in rows if row.get(key) is not None]) is not None
         }
     return summary
