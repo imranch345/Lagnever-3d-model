@@ -5,7 +5,7 @@ investor material. Every number points to where it comes from. The dated, comple
 including runs that failed, is [`LAB_NOTEBOOK.md`](LAB_NOTEBOOK.md). This page is updated
 whenever a headline result changes.
 
-*Last updated: 2026-10-16, 18:40.*
+*Last updated: 2026-10-18.*
 
 ## What the project is
 
@@ -38,12 +38,17 @@ Nothing here is medically validated or intended for clinical use.
 | R5 | Whether training uses the graph is bimodal across seeds, with no measurable precursor. | 6 of 10 seeds use it, 3 do not, 1 is intermediate; no warning signal at 5-step resolution or in gradient direction | Steps 15–19 |
 | R6 | **By step 805 the outcome is fixed**: changing the data order does not stop a seed that is about to escape. | 8 of 8 branches escape, at steps 830–840, final rotation 20.988° ± 0.023 | Step 20 |
 | R7 | **The outcome is fixed from initialisation.** Seed 9's escape survives every data ordering tried, from every branch point, including step 0. Ordering shifts only *when* it happens. | 48 of 48 branches escape (8 each at steps 0, 200, 400, 600 and 700) plus Step 20's 8 at 805. Escapes fall at steps 700–865 against seed 9's own 830–835, and all end at 20.93–21.07°. Every reference reproduces exactly; 182/182 frozen checksums clean. Prediction 4 (step 0 would split) was wrong | `STEP_21_BASIN_ENTRY_REPORT.md` |
+| R8 | **But not for a non-escaper.** From seed 5's initial weights, 1 of 8 orderings escapes. From step 400 none do: its non-escape is sealed early in training, in (0, 400]. Swapping batch orders between seeds 5 and 9 leaves each outcome with its weights. | Seed 5 from step 0: 1/8 escape (step 950, ends 21.06°), 1 in transition, 6 stuck; from 400 and 800: 0/8 each. Swap: seed 9's weights with seed 5's order escape (step 750); seed 5's weights with seed 9's order stay stuck. All references and identity controls exact; 182/182 checksums clean. Prediction 2 ("none") was wrong | `STEP_22_MIRROR_REPORT.md` |
 
-R5–R7 make a result about training dynamics. In this setting, whether a model uses relational
-structure is a discrete outcome. For seed 9 it is already settled by the initial weights:
-data order changes when it happens, never whether it happens. It is also not visible
-beforehand in standard training signals. Step 22 asks whether the same holds for a seed that
-does not escape.
+R5–R8 make a result about training dynamics. In this setting, whether a model uses relational
+structure is a discrete outcome, settled early.
+- For seed 9 it is settled by the initial weights: data order changes when the escape
+  happens, never whether.
+- For seed 5 the weights make non-use very likely but not certain. One ordering in eight
+  rescues it from step 0, and none from step 400.
+- In both seeds the outcome is not visible beforehand in standard training signals.
+
+Step 22 gives the first pair of runs that share a starting state and differ in outcome.
 
 ### Product (real CT)
 

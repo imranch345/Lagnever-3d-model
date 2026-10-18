@@ -592,3 +592,38 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Kept.** Six results completed before the stop: the reference and branches 00–04.
   - **Resume.** A watcher resumes the chain only once the machine is on AC power. Interrupted
     runs restart from the saved step-0 state, as in Step 21, and completed results are kept.
+
+## 2026-10-18 — Step 22 complete: decision B′, order can rescue a non-escaper
+
+- **Run.** The chain resumed on AC power at 21:19 on 2026-10-17. Arms 1 and 2 finished, the
+  gate found Arm 1 split, so Stage 2 (400 and 800) ran as fixed in the plan.
+  `CHAIN EXITED` came before 05:42 on 2026-10-18.
+- **Integrity, all clean:**
+  - capture 17/17, and references 25/25, 17/17 and 9/9 against frozen seed 5;
+  - both identity controls exactly equal their references;
+  - one starting state and 8 distinct orderings at 0, 400 and 800;
+  - the replay is identical;
+  - **182/182** frozen checksums before and after.
+- **Arm 1** (seed 5 from step 0): **1/8 escape**. Loader 2006 escapes at step 950 and ends
+  at 21.06° with usage 2.37°, a full escape. Loader 2007 is in transition (0.615°). Six are
+  stuck. Verdict: **split**.
+- **Stage 2:** from 400, 0/8; from 800, 0/8. Every branch is stuck, including ordering
+  2006. **Seed 5's non-escape is sealed in (0, 400].**
+- **Swap:**
+  - seed 9's weights with seed 5's order escape at 750, 85 steps earlier than with their
+    own order;
+  - seed 5's weights with seed 9's order stay stuck.
+  The outcome follows the weights in both directions.
+- **Decision B′.** H18 is supported for seed 5; H17 is not.
+- **Predictions:**
+  - 1 confirmed;
+  - **2 was wrong**: "none" was expected and the result is split;
+  - 3 confirmed;
+  - 4 confirmed: the one escape is late, at 950.
+- **Meaning.** The initial weights bias the outcome strongly in both seeds, but the bias is
+  absolute only for seed 9, under the orderings tried. Seed 5's outcome is sealed within its
+  first 400 steps.
+- **Next.** For the first time, branches that share a start and differ in outcome exist. A
+  candidate Step 23 narrows (0, 400] and compares them. It is to be preregistered first.
+- **Evidence:** `docs/STEP_22_MIRROR_REPORT.md`, `experiments/runs/step22/summary.json`,
+  README research table, RESULTS R8.
