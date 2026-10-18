@@ -5,14 +5,19 @@ For each held-out subject:
 1. **Fit.** A fresh code is optimised on the subject's labelled points, with the network
    frozen (auto-decoder test-time fitting, ``fit_steps`` Adam steps).
 2. **Decode.** The field is evaluated on a grid (``spacing_mm``) over the training points'
-   extent. Each structure is meshed two ways:
+   extent. Each structure is meshed three ways:
    - **binary:** marching cubes on its label mask, the M1 method;
+   - **clean:** the same after ``keep_largest``, which returns every piece but a structure's
+     largest to "nothing". Each modelled structure is one connected piece in a real thorax,
+     and a fitted field can leave small stray islands in parts of the grid with no data;
+     generation cleans them the same way;
    - **smooth:** marching cubes at 0 on its margin, its logit minus the best other logit.
      The margin is positive exactly where the structure is the most likely label, so the
      smooth surfaces bound the same regions as the labels, without the voxel staircase.
 3. **Compare** with the subject's real Level 1 meshes, moved by the same rigid alignment:
-   - symmetric mean surface distance in millimetres (both directions, averaged), for both
-     meshings;
+   - symmetric mean surface distance in millimetres (both directions, averaged), for each
+     meshing, summarised by mean and median over subjects;
+   - the number of pieces each structure decoded into;
    - Dice on the subject's labelled points.
 
 Level 2a is measured the same way: each held-out subject's registered shape is reconstructed by
@@ -37,6 +42,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import trimesh
+from scipy import ndimage  # type: ignore[import-untyped]
 from skimage import measure
 from torch.nn import functional
 
@@ -48,6 +54,7 @@ __all__ = [
     "decode",
     "decode_margins",
     "fit_code",
+    "keep_largest",
     "label_meshes",
     "load_checkpoint",
     "surface_distance",
@@ -151,6 +158,22 @@ def decode_margins(
     return margins.numpy().reshape(n_classes, *grid.shape)
 
 
+def keep_largest(volume: np.ndarray, n_classes: int) -> tuple[np.ndarray, list[int]]:
+    """Each class 1..n−1 cut to its largest connected piece; the rest become 0 ("nothing").
+
+    Returns the cleaned volume and, per class 1..n−1, how many pieces it had.
+    """
+    clean = volume.copy()
+    pieces: list[int] = []
+    for k in range(1, n_classes):
+        components, count = ndimage.label(volume == k)
+        pieces.append(int(count))
+        if count > 1:
+            sizes = np.bincount(components.ravel())[1:]
+            clean[(components > 0) & (components != 1 + int(np.argmax(sizes)))] = 0
+    return clean, pieces
+
+
 def label_meshes(
     volume: np.ndarray,
     grid: Grid,
@@ -245,6 +268,8 @@ def evaluate(
         volume = margins.argmax(axis=0).astype(np.uint8)
         meshes = label_meshes(volume, grid, classes)
         smooth = label_meshes(volume, grid, classes, margins)
+        cleaned, pieces = keep_largest(volume, len(classes) + 1)
+        clean = label_meshes(cleaned, grid, classes)
         real = _real_meshes(scenes_root, subject, rigid)
         predicted = (
             field(
@@ -256,12 +281,16 @@ def evaluate(
         )
         entry: dict[str, Any] = {}
         for index, entity in enumerate(classes, start=1):
-            row: dict[str, Any] = {"dice_points": _dice(predicted, labels[:50000], index)}
+            row: dict[str, Any] = {
+                "dice_points": _dice(predicted, labels[:50000], index),
+                "pieces": pieces[index - 1],
+            }
             if entity in meshes and entity in real:
                 row["surface_mm_2b"] = round(surface_distance(meshes[entity], real[entity]), 3)
                 row["surface_mm_2b_smooth"] = round(
                     surface_distance(smooth[entity], real[entity]), 3
                 )
+                row["surface_mm_2b_clean"] = round(surface_distance(clean[entity], real[entity]), 3)
             if models_2a is not None and entity in models_2a and entity in real:
                 rebuilt = models_2a[entity](subject)
                 if rebuilt is not None:
@@ -302,15 +331,27 @@ def _level2a(level2a_dir: Path) -> dict[str, Any]:
     return rebuilders
 
 
+SUMMARISED = (
+    "surface_mm_2b",
+    "surface_mm_2b_smooth",
+    "surface_mm_2b_clean",
+    "surface_mm_2a",
+    "dice_points",
+    "pieces",
+)
+
+
 def _summary(results: Mapping[str, Any], classes: Sequence[str]) -> dict[str, Any]:
+    """Per structure, the mean of each measure (its plain name) and the median (``_median``)."""
     summary: dict[str, Any] = {}
     for entity in classes:
         rows = [r[entity] for r in results.values() if entity in r]
-        summary[entity] = {
-            key: round(float(np.mean(values)), 3) if values else None
-            for key in ("surface_mm_2b", "surface_mm_2b_smooth", "surface_mm_2a", "dice_points")
-            if (values := [row[key] for row in rows if row.get(key) is not None]) is not None
-        }
+        entry: dict[str, Any] = {}
+        for key in SUMMARISED:
+            values = [row[key] for row in rows if row.get(key) is not None]
+            entry[key] = round(float(np.mean(values)), 3) if values else None
+            entry[f"{key}_median"] = round(float(np.median(values)), 3) if values else None
+        summary[entity] = entry
     return summary
 
 

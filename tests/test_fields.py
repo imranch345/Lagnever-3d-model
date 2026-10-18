@@ -270,6 +270,19 @@ class TestEvaluation:
         assert error(smooth) < 0.1 < error(binary)
         assert abs(smooth.volume / (4 / 3 * np.pi * 20**3) - 1) < 0.02
 
+    def test_keep_largest_drops_stray_islands(self) -> None:
+        """A structure's small island becomes 'nothing'; other classes are untouched."""
+        from fields.evaluate import keep_largest
+
+        volume = np.zeros((20, 20, 20), dtype=np.uint8)
+        volume[2:10, 2:10, 2:10] = 1
+        volume[15:17, 15:17, 15:17] = 1
+        volume[12:14, 2:4, 2:4] = 2
+        clean, pieces = keep_largest(volume, 3)
+        assert pieces == [2, 1]
+        assert (clean == 1).sum() == 8**3 and (clean[15:17, 15:17, 15:17] == 0).all()
+        assert (clean == 2).sum() == 8
+
     def test_margins_agree_with_labels(self, tmp_path) -> None:
         """Each point's positive margin is its argmax label, and only one class is positive."""
         from fields.evaluate import Grid, decode, decode_margins
