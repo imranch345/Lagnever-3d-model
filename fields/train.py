@@ -227,6 +227,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hidden", type=int, default=FieldConfig.hidden)
     parser.add_argument("--layers", type=int, default=FieldConfig.layers)
     parser.add_argument("--latent", type=int, default=FieldConfig.latent_dim)
+    parser.add_argument("--bands", type=int, default=FieldConfig.bands)
+    parser.add_argument("--lr-field", type=float, default=TrainConfig.lr_field)
+    parser.add_argument("--lr-codes", type=float, default=TrainConfig.lr_codes)
+    parser.add_argument("--save-every", type=int, default=TrainConfig.save_every)
+    parser.add_argument("--eval-every", type=int, default=TrainConfig.eval_every)
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(argv)
@@ -234,10 +239,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         steps=args.steps,
         subjects_per_step=args.subjects_per_step,
         points_per_subject=args.points_per_subject,
+        lr_field=args.lr_field,
+        lr_codes=args.lr_codes,
+        eval_every=args.eval_every,
+        save_every=args.save_every,
         max_subjects=args.max_subjects,
         seed=args.seed,
     )
-    field = FieldConfig(hidden=args.hidden, layers=args.layers, latent_dim=args.latent)
+    field = FieldConfig(
+        hidden=args.hidden, layers=args.layers, latent_dim=args.latent, bands=args.bands
+    )
     final = train(args.data, args.out, config, field, device=args.device)
     print(f"final: {json.dumps(final)}")
     return 0
