@@ -495,7 +495,17 @@ class TestResize:
         start = checkpoint["codes"][1:2]
         labels = decode(model, start, grid)
         code, soft = resize_code(
-            model, start, 1, 1.1, grid, labels, steps=60, lr=5e-2, prior=0.0, margin_mm=15
+            model,
+            start,
+            1,
+            1.1,
+            grid,
+            labels,
+            steps=60,
+            lr=5e-2,
+            prior=0.0,
+            margin_mm=15,
+            chunk=500,  # many chunks per step, as on a real thorax
         )
         assert soft["soft_after_ml"] > 1.15 * soft["soft_before_ml"], soft
         if parts:

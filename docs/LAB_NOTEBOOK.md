@@ -897,3 +897,54 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Best Level 2b so far (run 3) against Level 2a, by median:**
   - the lungs are better;
   - the heart is 0.2–0.4 mm behind, against a yardstick floor of about 0.35–0.47 mm.
+
+## 2026-10-18 (20:35) — Level 2b M3 begins: generation passes its target
+
+- **GPU, M2 continued.**
+  - The user approved a second spot session. Spot L4 capacity was exhausted in us-central1,
+    so it ran in us-east1-b.
+  - Google preempted it after 26 minutes. Runs 4 and 5 were saved at steps 12,000 and
+    6,000.
+  - Asked again, the user chose spot. A third VM started in us-central1-c, after five zones
+    had no capacity, and both runs resumed exactly.
+  - Launch, upload and resume are now one script.
+  - **Bug fixed:** zsh read `$IP:lagnav/...` as the `:l` modifier, so the first 8 minutes of
+    checkpoint sync silently failed. It is fixed by bracing the variable.
+- **New: `fields.generate`.** It draws codes from a Gaussian fitted to the training codes
+  (1 SD, clipped at 3), decodes them, keeps each structure's largest piece, and judges each
+  sample:
+  - **volume** within the training range, from CT volumes, with no margin;
+  - **sides**, by Level 1's rule;
+  - **stray share** no worse than the training subjects' own decodes, plus 1 point;
+  - **closed** meshes;
+  - **no point claimed twice.**
+
+  **Novelty** is the distance to the nearest training subject's real meshes. Its baseline is
+  the same number for each held-out real person.
+- **Result, run 3's field, 50 samples at 1 SD, unfiltered:**
+
+  | | Level 2a | Level 2b (run 3) | target |
+  | --- | --- | --- | --- |
+  | valid, unfiltered | 78% | **94%** (47/50) | ≥ 90% |
+  | overlap | checked | **0 on every sample** | 0 by construction |
+  | novelty, median | 8.8 mm vs real 9.1 mm | **4.27 mm vs real 4.70 mm** (91%) | about a real person's |
+
+  - **Failures:** left lung 574 mL, below the training minimum of 804 mL; myocardium 75 mL
+    against a minimum of 81 mL; right lung 3.3% stray against a limit of 1.6%.
+  - **Spread:** the 10th–90th percentiles of novelty are 3.82–4.96 mm for samples and
+    3.90–6.04 mm for real people. Samples are slightly less extreme than real people.
+  - **No copying:** the nearest training subject differs from sample to sample; no subject
+    is nearest more than 3 times in 50.
+  - **Control:** 94% of training subjects' own decodes pass. The failures are decoded
+    volumes 1–3% above the CT maximum, a 2 mm grid effect.
+  - **The 2a and 2b novelty numbers use different measures.** 2a measures correspondence
+    vertices; 2b measures surface samples. Each is judged against its own real-person
+    baseline.
+- **New: viewer integration.** `fields.generate.SampleWriter` writes a valid draw as a Level 1
+  scene: GLB meshes through Level 1's own `mask_to_mesh`, plus a manifest with the
+  "generated" record. With `--field <checkpoint>`, the viewer's "new thorax" draws from Level
+  2b.
+- **New: `fields.resize`.** It grows one structure by optimising its code toward factor³ its
+  soft volume, with a prior toward the start. With part fields, only that part's code moves.
+  Checks and bisection work as in Level 2a. The first real test is s0029's LV at +15%,
+  running now.

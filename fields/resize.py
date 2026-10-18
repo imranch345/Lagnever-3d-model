@@ -96,12 +96,13 @@ def resize_code(
     prior: float = 1.0,
     margin_mm: float = 30.0,
     spacing_mm: float = 3.0,
+    chunk: int = 32768,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """A code whose structure ``index`` has ``factor``³ its starting soft volume, if it can."""
     device = start.device
     points = torch.from_numpy(_box_points(labels, grid, index, margin_mm, spacing_mm)).to(device)
     voxel_ml = spacing_mm**3 / 1000.0
-    before = soft_volume(field, start, points, index, voxel_ml)
+    before = soft_volume(field, start, points, index, voxel_ml, chunk)
     target = before * factor**3
     moving = torch.zeros(start.shape[-1], dtype=torch.bool, device=device)
     config = field.config
@@ -115,16 +116,19 @@ def resize_code(
     volume = before
     for _ in range(steps):
         optimizer.zero_grad(set_to_none=True)
-        code = start + delta * moving
-        with torch.no_grad():
-            volume = soft_volume(field, code, points, index, voxel_ml)
+        # A leaf per step: each chunk's backward adds into code.grad, and none of them has to
+        # pass back through a graph an earlier chunk already freed.
+        code = (start + delta.detach() * moving).requires_grad_(True)
+        volume = soft_volume(field, code, points, index, voxel_ml, chunk)
         weight = 2.0 * (volume / target - 1.0) / target
-        soft_volume(field, code, points, index, voxel_ml, weight=weight)
+        soft_volume(field, code, points, index, voxel_ml, chunk, weight=weight)
         penalty = prior * (delta * moving).pow(2).sum() / moving.sum()
         penalty.backward()
+        assert delta.grad is not None and code.grad is not None
+        delta.grad += code.grad * moving
         optimizer.step()
     final = (start + delta * moving).detach()
-    after = soft_volume(field, final, points, index, voxel_ml)
+    after = soft_volume(field, final, points, index, voxel_ml, chunk)
     return final, {"soft_before_ml": before, "soft_target_ml": target, "soft_after_ml": after}
 
 
