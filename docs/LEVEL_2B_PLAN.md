@@ -24,6 +24,15 @@ The user's goal is a model that designs plausible hearts and lungs and lets one 
 changed by a sentence. For that, a structure that grows must push its neighbours aside, as it
 does in a body.
 
+## Status (2026-10-19)
+
+| milestone | state | key numbers |
+| --- | --- | --- |
+| **M1** labelled points, model, training, evaluation | done | the pipeline is tested; the first prototype was 1.5–2× worse than Level 2a |
+| **M2** long GPU training | **done; fit target met** | run 6 (parts with compact codes) beats Level 2a on all seven structures: heart medians 0.57–1.10 mm against 0.82–1.43; lungs 2.56 and 2.86 against 3.58 and 4.05. About $2.15 spent |
+| **M3** generation, resize, viewer | in progress | generation 88% unfiltered at 1 SD under real-anatomy limits (target 90%; Level 2a 78%), novelty 94% of a real person's, 0 overlap; the viewer draws valid Level 2b thoraxes. Resize: lungs untouched by heart edits, but LV growth is +2% (target +15%): thin walls break first |
+| **M4** more structures, higher resolution | not started | resolution is the lever for resize |
+
 ## 2. Approach: one field that labels every point
 
 A neural network f(x, z) takes a 3D point x and a subject code z. It returns, for that point,

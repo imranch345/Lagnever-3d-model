@@ -1121,3 +1121,19 @@ data); code at `8fc2d04` + `f1bdcd4`.
   but only by breaking a neighbour, and the checks catch that. Level 2b's best (+8.3%) is
   4× Level 2a's +2%, but the +15% target is not met. Run 6's resize with kept neighbours,
   under real-anatomy limits, is running.
+- **Run 6, resize under real-anatomy limits** (LV +15% on s0029, prior 0.1, 300 steps):
+  - **neighbours kept:** the field reaches the full +15.0% size (+51.9% volume), but the LV
+    itself breaks into pieces (3.3% stray). From +3% on, the myocardium sheds a piece (1.4%
+    against a limit of 1.02%). The largest passing change is **+2.0%** (+6.1% volume).
+  - **wall grown with the chamber** (`--grow-with heart.myocardium:2`, its volume steered to
+    factor² so the wall keeps its thickness): at +15% the myocardium does reach 196 mL
+    (148 × 1.15²), but the LV and RV fragment. At +3% the myocardium still sheds 1.4%. The
+    largest passing change is again **+2.0%**.
+- **Conclusion for resize.** Under the fair, real-anatomy rule, Level 2b grows the LV by +2%,
+  the same as Level 2a. Its advantage is elsewhere: heart edits leave the lungs untouched.
+  - **The limit is not the optimiser:** it reaches the asked size every time.
+  - **The limit is the field's thin walls,** learned on a 2 mm sampling. Stretched, they
+    break at the 2 mm grid where no real wall does.
+  - **Deleting the shed piece would leave a hole in the wall,** so the refusal stands.
+  - **Next lever:** resolution (finer sampling and decoding near walls, milestone M4), or a
+    connectivity-aware training loss.
