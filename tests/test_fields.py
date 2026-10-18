@@ -149,10 +149,43 @@ class TestTheField:
         assert torch.cdist(codes, codes).max() > 0, "subjects need distinct codes"
 
 
+class TestFocus:
+    """Drawing a share of each step's points around chosen structures."""
+
+    def test_focus_points_are_the_box_around_the_class(self) -> None:
+        """Indices are exactly the points within the class's box ± margin; counts per subject."""
+        from fields.train import focus_points
+
+        points = torch.tensor([[[0.0, 0, 0], [5, 0, 0], [12, 0, 0], [30, 0, 0]]] * 2)
+        labels = torch.tensor([[1, 1, 0, 0], [0, 0, 0, 0]])
+        padded, counts = focus_points(points, labels, [1], margin_mm=8.0)
+        assert counts.tolist() == [3, 4], "subject 2 has no class 1, so keeps every point"
+        assert padded[0, :3].tolist() == [0, 1, 2]
+
+    def test_a_focused_run_draws_its_share_inside_the_box(self, tmp_path) -> None:
+        """With focus 0.5 the field still learns the spheres; most focused points are near 'a'."""
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(
+            steps=300,
+            subjects_per_step=4,
+            points_per_subject=2048,
+            eval_every=300,
+            seed=0,
+            focus_fraction=0.5,
+            focus_prefix="a",
+        )
+        field = FieldConfig(hidden=64, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        assert train(data_dir, tmp_path / "run", config, field, device="cpu")["accuracy"] > 0.9
+
+
 class TestResume:
     """A stopped run continues exactly where it stopped (flat battery, reclaimed GPU)."""
 
-    def test_stop_and_resume_equals_one_uninterrupted_run(self, tmp_path) -> None:
+    @pytest.mark.parametrize("focus", [0.0, 0.5])
+    def test_stop_and_resume_equals_one_uninterrupted_run(self, tmp_path, focus) -> None:
         """Same settings, same final network and codes, bit for bit, on the CPU."""
         from fields.model import FieldConfig
         from fields.train import TrainConfig, train
@@ -165,6 +198,8 @@ class TestResume:
             eval_every=60,
             save_every=40,
             seed=3,
+            focus_fraction=focus,
+            focus_prefix="a",
         )
         field = FieldConfig(hidden=32, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
         train(data_dir, tmp_path / "whole", config, field, device="cpu")

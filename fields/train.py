@@ -7,6 +7,11 @@ points, and minimises:
 - plus ``code_prior`` × the mean squared code, which keeps the codes in a ball that a
   Gaussian can later sample.
 
+With ``focus_fraction`` above 0, that share of each subject's points is drawn from the box
+around its heart structures (classes named ``focus_prefix``…, plus ``focus_margin_mm``). The
+heart's five structures hold under 9% of the points, against over 90% for the lungs and
+"nothing"; focusing gives their boundaries more of every step without changing the data.
+
 Every ``eval_every`` steps it records loss, accuracy, and per-class intersection-over-union on
 a fixed probe of training points. A checkpoint holds the network, the codes, the config, the
 subject list and the history, so a run can be resumed, evaluated or sampled from.
@@ -30,7 +35,7 @@ from torch.nn import functional
 
 from fields.model import DEFAULT_FIELD, AutoDecoder, FieldConfig, pick_device
 
-__all__ = ["TrainConfig", "class_weights", "load_points", "train"]
+__all__ = ["TrainConfig", "class_weights", "focus_points", "load_points", "train"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,9 @@ class TrainConfig:
     save_every: int = 500
     seed: int = 0
     max_subjects: int | None = None
+    focus_fraction: float = 0.0
+    focus_prefix: str = "heart."
+    focus_margin_mm: float = 10.0
 
 
 #: The default run; frozen, so sharing one instance is safe.
@@ -68,6 +76,32 @@ def class_weights(labels: torch.Tensor, n_classes: int) -> torch.Tensor:
     counts = torch.bincount(labels.flatten(), minlength=n_classes).double()
     weights = torch.where(counts > 0, counts.clamp(min=1).rsqrt(), torch.ones_like(counts))
     return (weights / weights.mean()).float()
+
+
+def focus_points(
+    points: torch.Tensor, labels: torch.Tensor, focus: Sequence[int], margin_mm: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per subject, the indices of its points in the box around its ``focus`` classes ± margin.
+
+    Returned padded, (S, M), with each subject's count, (S,). A subject without any focus class
+    keeps all its points.
+    """
+    wanted = torch.tensor(list(focus), dtype=labels.dtype)
+    rows = []
+    for subject_points, subject_labels in zip(points, labels, strict=True):
+        member = torch.isin(subject_labels, wanted)
+        if not bool(member.any()):
+            rows.append(torch.arange(len(subject_points)))
+            continue
+        low = subject_points[member].min(0).values - margin_mm
+        high = subject_points[member].max(0).values + margin_mm
+        inside = ((subject_points >= low) & (subject_points <= high)).all(-1)
+        rows.append(torch.nonzero(inside).squeeze(1))
+    counts = torch.tensor([len(row) for row in rows])
+    padded = torch.zeros(len(rows), int(counts.max()), dtype=torch.int64)
+    for i, row in enumerate(rows):
+        padded[i, : len(row)] = row
+    return padded, counts
 
 
 def _iou(predicted: torch.Tensor, truth: torch.Tensor, n_classes: int) -> list[float | None]:
@@ -114,6 +148,11 @@ def train(
         torch.backends.cuda.matmul.allow_tf32 = True
     points, labels = load_points(data_dir, subjects)
     weights = class_weights(labels, field_config.n_classes).to(run_device)
+    n_focus = int(round(config.points_per_subject * config.focus_fraction))
+    focus = [
+        k for k, name in enumerate(manifest["classes"]) if name.startswith(config.focus_prefix)
+    ]
+    focus_index, focus_counts = focus_points(points, labels, focus, config.focus_margin_mm)
     # All points live on the device (~0.4 GB for 105 subjects); a step then indexes there.
     points, labels = points.to(run_device), labels.to(run_device)
     model = AutoDecoder(len(subjects), field_config).to(run_device)
@@ -167,6 +206,10 @@ def train(
                 points.shape[1], size=(config.subjects_per_step, config.points_per_subject)
             )
         )
+        if n_focus:
+            draw = torch.from_numpy(rng.random((config.subjects_per_step, n_focus)))
+            slots = (draw * focus_counts[chosen].unsqueeze(1)).long()
+            index[:, :n_focus] = torch.gather(focus_index[chosen], 1, slots)
         chosen, index = chosen.to(run_device), index.to(run_device)
         batch_points = points[chosen.unsqueeze(1), index]
         batch_labels = labels[chosen.unsqueeze(1), index]
@@ -243,6 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--tf32", action="store_true", help="TensorFloat-32 matmuls on CUDA")
+    parser.add_argument("--focus-fraction", type=float, default=TrainConfig.focus_fraction)
+    parser.add_argument("--focus-margin", type=float, default=TrainConfig.focus_margin_mm)
     args = parser.parse_args(argv)
     config = TrainConfig(
         steps=args.steps,
@@ -254,6 +299,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_every=args.save_every,
         max_subjects=args.max_subjects,
         seed=args.seed,
+        focus_fraction=args.focus_fraction,
+        focus_margin_mm=args.focus_margin,
     )
     field = FieldConfig(
         hidden=args.hidden, layers=args.layers, latent_dim=args.latent, bands=args.bands
