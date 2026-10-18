@@ -553,3 +553,27 @@ class TestResize:
         )
         mean = checkpoint["codes"].mean(0)
         assert (held - mean).norm() < (free - mean).norm()
+
+    def test_kept_structures_do_not_shrink_much(self, tmp_path) -> None:
+        """Growing sphere 'a' with 'b' kept leaves 'b' no smaller than growing it freely does."""
+        from fields.evaluate import Grid, decode, load_checkpoint
+        from fields.model import FieldConfig
+        from fields.resize import resize_code, soft_volumes
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(steps=300, subjects_per_step=4, points_per_subject=2048, seed=0)
+        field = FieldConfig(hidden=48, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        train(data_dir, tmp_path / "run", config, field, device="cpu")
+        model, checkpoint = load_checkpoint(tmp_path / "run" / "checkpoint.pt", torch.device("cpu"))
+        grid = Grid([-60, -60, -60], [60, 60, 60], 3.0)
+        start = checkpoint["codes"][1:2]
+        labels = decode(model, start, grid)
+        common = {"steps": 40, "lr": 5e-2, "prior": 0.0, "margin_mm": 60, "chunk": 4000}
+        free, _ = resize_code(model, start, 1, 1.25, grid, labels, **common)
+        kept, _ = resize_code(
+            model, start, 1, 1.25, grid, labels, keep=[2], keep_weight=50.0, **common
+        )
+        points = torch.from_numpy(grid.points())
+        b = [soft_volumes(model, c, points, 0.027)[2] for c in (start, free, kept)]
+        assert b[2] >= b[1] - 1e-6, b

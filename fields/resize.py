@@ -55,7 +55,38 @@ from fields.evaluate import Grid, load_checkpoint
 from fields.generate import decode_thorax, judge
 from fields.model import Field, pick_device
 
-__all__ = ["ResizeResult", "baseline_limits", "largest_change", "resize_code", "soft_volume"]
+__all__ = [
+    "ResizeResult",
+    "baseline_limits",
+    "largest_change",
+    "resize_code",
+    "soft_volume",
+    "soft_volumes",
+]
+
+
+def soft_volumes(
+    field: Field,
+    code: torch.Tensor,
+    points: torch.Tensor,
+    voxel_ml: float,
+    chunk: int = 32768,
+    weights: torch.Tensor | None = None,
+) -> np.ndarray:
+    """Every class's soft volume in mL; with per-class ``weights``, also back-propagates Σ w·V."""
+    total: torch.Tensor | None = None
+    for start in range(0, len(points), chunk):
+        part = points[start : start + chunk].unsqueeze(0)
+        if weights is None:
+            with torch.no_grad():
+                shares = torch.softmax(field(part, code), dim=-1)[0].sum(dim=0)
+        else:
+            shares = torch.softmax(field(part, code), dim=-1)[0].sum(dim=0)
+            ((weights * shares).sum() * voxel_ml).backward()
+        found = shares.detach().cpu()
+        total = found if total is None else total + found
+    assert total is not None
+    return np.asarray(total.double().numpy() * voxel_ml)
 
 
 def soft_volume(
@@ -67,18 +98,12 @@ def soft_volume(
     chunk: int = 32768,
     weight: float | None = None,
 ) -> float:
-    """The structure's soft volume in mL; with ``weight``, also back-propagates weight · V."""
-    total = 0.0
-    for start in range(0, len(points), chunk):
-        part = points[start : start + chunk].unsqueeze(0)
-        if weight is None:
-            with torch.no_grad():
-                share = torch.softmax(field(part, code), dim=-1)[0, :, index].sum()
-        else:
-            share = torch.softmax(field(part, code), dim=-1)[0, :, index].sum()
-            (weight * share * voxel_ml).backward()
-        total += float(share.detach()) * voxel_ml
-    return total
+    """One class's soft volume in mL; with ``weight``, also back-propagates weight · V."""
+    weights = None
+    if weight is not None:
+        weights = torch.zeros(field.config.n_classes, device=points.device)
+        weights[index] = weight
+    return float(soft_volumes(field, code, points, voxel_ml, chunk, weights)[index])
 
 
 def _box_points(
@@ -109,12 +134,20 @@ def resize_code(
     chunk: int = 32768,
     plausibility: float = 0.0,
     codes: torch.Tensor | None = None,
+    keep: Sequence[int] = (),
+    keep_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    """A code whose structure ``index`` has ``factor``³ its starting soft volume, if it can."""
+    """A code whose structure ``index`` has ``factor``³ its starting soft volume, if it can.
+
+    Structures in ``keep`` are held at no less than their starting soft volume (in the same
+    box), by ``keep_weight`` · Σ min(0, V/V₀ − 1)². A growing chamber then pushes its
+    neighbours aside instead of eating into them.
+    """
     device = start.device
     points = torch.from_numpy(_box_points(labels, grid, index, margin_mm, spacing_mm)).to(device)
     voxel_ml = spacing_mm**3 / 1000.0
-    before = soft_volume(field, start, points, index, voxel_ml, chunk)
+    before_all = soft_volumes(field, start, points, voxel_ml, chunk)
+    before = float(before_all[index])
     target = before * factor**3
     moving = torch.zeros(start.shape[-1], dtype=torch.bool, device=device)
     config = field.config
@@ -145,9 +178,15 @@ def resize_code(
         # A leaf per step: each chunk's backward adds into code.grad, and none of them has to
         # pass back through a graph an earlier chunk already freed.
         code = (start + delta.detach() * moving).requires_grad_(True)
-        volume = soft_volume(field, code, points, index, voxel_ml, chunk)
-        weight = 2.0 * (volume / target - 1.0) / target
-        soft_volume(field, code, points, index, voxel_ml, chunk, weight=weight)
+        volumes = soft_volumes(field, code, points, voxel_ml, chunk)
+        volume = float(volumes[index])
+        weights = torch.zeros(config.n_classes, device=device)
+        weights[index] = 2.0 * (volume / target - 1.0) / target
+        for j in keep:
+            ratio = volumes[j] / before_all[j]
+            if ratio < 1.0:
+                weights[j] = keep_weight * 2.0 * (ratio - 1.0) / before_all[j]
+        soft_volumes(field, code, points, voxel_ml, chunk, weights)
         penalty = prior * (delta * moving).pow(2).sum() / moving.sum()
         if precision is not None and mean is not None:
             away = (start + delta * moving)[0, moving] - mean
@@ -199,8 +238,18 @@ def _attempt(
     codes: torch.Tensor,
 ) -> ResizeResult:
     index = classes.index(entity) + 1
+    settings = dict(options)
+    keep = [classes.index(e) + 1 for e in settings.pop("keep", [])]
     code, soft = resize_code(
-        field, start, index, 1 + percent / 100, grid, start_labels, codes=codes, **options
+        field,
+        start,
+        index,
+        1 + percent / 100,
+        grid,
+        start_labels,
+        codes=codes,
+        keep=keep,
+        **settings,
     )
     thorax = decode_thorax(field, code, grid, classes)
     failures = judge(thorax.measures, limits["volume_ml"], limits["stray"], ontology)
@@ -317,6 +366,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--plausibility", type=float, default=0.0, help="weight of the Mahalanobis prior"
     )
+    parser.add_argument(
+        "--keep", nargs="*", default=[], help="structures held at no less than their volume"
+    )
+    parser.add_argument("--keep-weight", type=float, default=1.0)
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -328,7 +381,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.entity,
         args.percent,
         device=args.device,
-        options={"steps": args.steps, "prior": args.prior, "plausibility": args.plausibility},
+        options={
+            "steps": args.steps,
+            "prior": args.prior,
+            "plausibility": args.plausibility,
+            "keep": args.keep,
+            "keep_weight": args.keep_weight,
+        },
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
