@@ -2,6 +2,7 @@
 # Level 2b GPU sessions on Google Cloud: one L4 VM with the safeguards in docs/LEVEL_2B_SPEND.md.
 #
 #   tools/gpu_session.sh launch RUNS_FILE DATA_DIR   create the VM, upload, resume or start runs
+#   tools/gpu_session.sh deploy RUNS_FILE DATA_DIR   the same onto the VM that already exists
 #   tools/gpu_session.sh pull                       copy every run's files back to the Mac
 #   tools/gpu_session.sh status                     VM state and the last line of each run log
 #   tools/gpu_session.sh delete                     delete the VM
@@ -52,6 +53,8 @@ create() {
       ip="$(gcloud compute instances describe "$NAME" --project "$PROJECT" --zone "$zone" \
         --format='value(networkInterfaces[0].accessConfigs[0].natIP)')"
       printf 'ZONE=%s\nIP=%s\n' "$zone" "$ip" > "$STATE"
+      # A new VM can reuse a released IP with a new host key; forget the old one.
+      ssh-keygen -R "$ip" -f "$KNOWN" > /dev/null 2>&1 || true
       rm -f "$keys"
       echo "created $provisioning in $zone at $(date -u +%H:%M:%S) UTC"
       return 0
@@ -64,6 +67,11 @@ create() {
 }
 
 launch() {
+  create
+  deploy "$1" "$2"
+}
+
+deploy() {
   local runs_file="$1" data_dir="$2" data_name stage
   data_name="$(basename "$data_dir")"
   mkdir -p "$CACHE"
@@ -71,7 +79,6 @@ launch() {
     COPYFILE_DISABLE=1 tar --no-xattrs -cf "$CACHE/$data_name.tar" \
       -C "$(dirname "$data_dir")" "$data_name/manifest.json" "$data_name/points"
   fi
-  create
   for _ in $(seq 1 40); do vm true 2>/dev/null && break; sleep 10; done
   stage="$(mktemp -d)"
   (cd "$REPO" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$stage/code.tgz" \
@@ -116,6 +123,7 @@ vm_state() {
 
 case "${1:-}" in
   launch) launch "$2" "$3" ;;
+  deploy) deploy "$2" "$3" ;;
   pull) pull ;;
   status)
     echo "VM: $(vm_state || true)"
@@ -128,5 +136,5 @@ case "${1:-}" in
     echo "VM: $(vm_state || true)"
     ;;
   vm) shift; vm "$@" ;;
-  *) sed -n '2,16p' "$0"; exit 2 ;;
+  *) sed -n '2,17p' "$0"; exit 2 ;;
 esac
