@@ -13,6 +13,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.43 (14:36–16:02 UTC) | ~0.50 (estimate) | M2 | third session: run 4 finished, run 5 to step 28000, run 6 started; **preempted** at 16:02 | **~1.65** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 1.47 (16:04–17:32 UTC) | ~0.50 (estimate) | M2 | fourth session: runs 5 and 6 finished; VM deleted | **~2.15** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.01 (22:56:58–22:57:39 UTC) | ~0.01 | M2/stage 2 | stage 2 chest runs A and B, approved by the user (≤ $5): **preempted 41 s after creation**, before training began; the user then paused for the night | **~2.16** |
+| 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | running since 09:19 UTC | pending | stage 2 | chest runs A (bands 8) and B (bands 9), approved by the user: spot first, on-demand after two preemptions or no capacity; cap $5 | pending |
 
 ## Sessions
 
@@ -73,3 +74,12 @@ provider's own billing figures. A cap is a hard stop.
   capacity. Google preempted it 41 s later, before the upload finished.
 - The user then asked to pause for the night. The launcher was stopped, and a check confirmed
   that no lagnav instance or disk remains. Cost: about $0.01.
+
+### 2026-10-19 · Stage 2 chest runs
+
+- **Approval:** the user chose "spot, fallback on-demand". Spot is tried first. After two
+  preemptions, or if no zone has spot capacity, the session moves to on-demand. The cap
+  for the session is $5.
+- **Launch:** created at 09:19 UTC in us-central1-a by the new `tools/gpu_session.sh`,
+  after us-east1-b/c/d had no spot capacity. Runs A and B started together and use 12 GB
+  of the L4.
