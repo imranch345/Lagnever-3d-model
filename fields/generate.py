@@ -61,6 +61,7 @@ from awr.ontology import AnatomyOntology, load_ontology
 from fields.evaluate import (
     Grid,
     _real_meshes,
+    apply_crops,
     decode_margins,
     keep_largest,
     label_meshes,
@@ -139,7 +140,7 @@ class Thorax:
 def decode_thorax(field: Field, code: torch.Tensor, grid: Grid, classes: Sequence[str]) -> Thorax:
     """Decode, measure stray pieces, keep each structure's largest piece, mesh and measure."""
     margins = decode_margins(field, code, grid)
-    labels = margins.argmax(axis=0).astype(np.uint8)
+    labels = apply_crops(margins.argmax(axis=0).astype(np.uint8), classes)
     claims = int(((margins > 0).sum(axis=0) > 1).sum())
     cleaned, pieces = keep_largest(labels, len(classes) + 1)
     voxel_ml = grid.spacing**3 / 1000.0

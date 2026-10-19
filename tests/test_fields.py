@@ -128,6 +128,23 @@ class TestChest:
                 "the phantom's vessels run below the lungs, so the crop must remove something"
             )
 
+    def test_decoded_vessels_are_cut_to_the_lungs_like_the_data(self) -> None:
+        """An IVC continuing below the lungs is cut at their lowest slice; others untouched."""
+        from fields.evaluate import apply_crops
+
+        classes = [
+            "heart.inferior_vena_cava",
+            "respiratory.lung_lower_lobe_right",
+            "heart.left_ventricle",
+        ]
+        volume = np.zeros((4, 10, 4), dtype=np.uint8)
+        volume[0, 3:9, 0] = 2  # lobe spans y 3..8
+        volume[1, 0:6, 1] = 1  # IVC runs from y 0 up to 5
+        volume[2, 0:2, 2] = 3  # LV below the lungs: no crop, kept
+        cut = apply_crops(volume, classes)
+        assert np.flatnonzero(cut[1, :, 1] == 1).tolist() == [3, 4, 5]
+        assert (cut[2, 0:2, 2] == 3).all() and (cut == 2).sum() == 6
+
     def test_parts_can_group_several_prefixes(self, tmp_path) -> None:
         """'a|b' is one part; the first matching part wins."""
         from fields.train import part_indices

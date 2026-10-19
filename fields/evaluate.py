@@ -57,6 +57,7 @@ __all__ = [
     "Grid",
     "decode",
     "decode_margins",
+    "apply_crops",
     "fit_code",
     "keep_largest",
     "label_meshes",
@@ -178,6 +179,41 @@ def keep_largest(volume: np.ndarray, n_classes: int) -> tuple[np.ndarray, list[i
     return clean, pieces
 
 
+def apply_crops(volume: np.ndarray, classes: Sequence[str]) -> np.ndarray:
+    """Cut classes that the label map crops to their reference's extent, as the data was cut.
+
+    The aorta and the IVC are labelled only within the lungs' superior–inferior extent
+    (``fields.data``, as in Level 1). Where no training point ever was, outside that
+    extent, a decoded field can continue them. Decoded volumes are therefore cut the same
+    way, along the aligned frame's superior axis (y). Classes without a crop are unchanged.
+    """
+    from assets.labels import DEFAULT_LABEL_MAP, load_label_map
+
+    label_map = load_label_map(DEFAULT_LABEL_MAP)
+    known = set(label_map.entity_ids())
+    out = volume.copy()
+    for index, entity in enumerate(classes, start=1):
+        if entity not in known:
+            continue
+        entry = label_map.for_entity(entity)
+        if entry.crop is None:
+            continue
+        wanted = set(label_map.crops[entry.crop].reference_labels)
+        reference = [
+            k
+            for k, other in enumerate(classes, start=1)
+            if other in known and wanted & set(label_map.for_entity(other).labels)
+        ]
+        rows = np.flatnonzero(np.isin(volume, reference).any(axis=(0, 2)))
+        if len(rows) == 0:
+            continue
+        outside = np.ones(volume.shape[1], dtype=bool)
+        outside[rows.min() : rows.max() + 1] = False
+        mask = (out == index) & outside[None, :, None]
+        out[mask] = 0
+    return out
+
+
 def label_meshes(
     volume: np.ndarray,
     grid: Grid,
@@ -287,7 +323,7 @@ def evaluate(
         rigid = np.asarray(manifest["stats"][subject]["frame"]["rigid"], dtype=np.float64)
         code = fit_code(field, points, labels, steps=fit_steps, weights=weights)
         margins = decode_margins(field, code, grid)
-        volume = margins.argmax(axis=0).astype(np.uint8)
+        volume = apply_crops(margins.argmax(axis=0).astype(np.uint8), classes)
         meshes = label_meshes(volume, grid, classes)
         smooth = label_meshes(volume, grid, classes, margins) if smooth_meshes else {}
         cleaned, pieces = keep_largest(volume, len(classes) + 1)
