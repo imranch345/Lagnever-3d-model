@@ -1218,3 +1218,35 @@ data); code at `8fc2d04` + `f1bdcd4`.
     session spend is about $3.05.
 - **Held-out evaluation of both runs is running,** with the floor, no smooth meshing, and
   Level 2a for the heart.
+- **Stage 2 held-out results,** 26 subjects, cleaned surface distance (mean / median, mm).
+  The floor is the true labels meshed the same way.
+
+  | structure | floor | run A (bands 8) | run B (bands 9) | run 6 (7 classes) | Level 2a |
+  | --- | --- | --- | --- | --- | --- |
+  | LA | 0.35 | 0.90 / 0.88 | 0.91 / 0.88 | 0.92 / 0.89 | 1.39 / 1.25 |
+  | LV | 0.35 | 0.65 / 0.60 | 0.64 / 0.59 | 0.64 / 0.57 | 0.89 / 0.82 |
+  | RV | 0.35 | 0.90 / 0.84 | 0.88 / 0.83 | 0.86 / 0.80 | 1.24 / 1.20 |
+  | myocardium | 0.39 | 0.72 / 0.67 | 0.69 / 0.66 | 0.69 / 0.62 | 0.94 / 0.90 |
+  | RA | 0.73 | 1.52 / 1.43 | 1.49 / 1.38 | 1.19 / 1.10 | 1.60 / 1.43 |
+  | aorta | 0.36 | 2.46 / 1.80 | 2.84 / 1.83 | – | – |
+  | pulmonary trunk | 0.35 | 1.75 / 1.43 | 1.71 / 1.69 | – | – |
+  | IVC | 0.36 | 4.19 / 3.86 | 4.73 / 3.30 | – | – |
+  | left upper lobe | 0.35 | 3.47 / 2.40 | 3.18 / 2.25 | – | – |
+  | left lower lobe | 0.36 | 3.44 / 2.54 | 3.43 / 2.26 | – | – |
+  | right upper lobe | 0.36 | 2.84 / 2.19 | 2.54 / 2.04 | – | – |
+  | right middle lobe | 0.36 | 3.03 / 2.23 | 2.88 / 2.05 | – | – |
+  | right lower lobe | 0.36 | 3.29 / 2.35 | 3.73 / 2.27 | – | – |
+  | trachea | 0.36 | 3.77 / 3.30 | 4.32 / 3.53 | – | – |
+
+  - **Heart.** It holds up with twice the classes. LA, LV, RV and myocardium beat Level 2a
+    on 24–26 of 26 subjects in both runs, within about 0.05 mm of run 6.
+  - **RA.** Its floor rose from about 0.47 to 0.73 mm: the RA–IVC junction now goes to the
+    IVC label while Level 1's RA mesh keeps it. Part of the RA's apparent loss against
+    run 6 is this labelling convention, not the model.
+  - **Lobes.** Medians are 2.0–2.5 mm, as good as the whole lungs before, though the lobes
+    add fissures.
+  - **Weak spots:** the IVC (3.3–3.9 mm) and the trachea (3.3–3.5 mm), short tubes with
+    cut ends; the aorta's mean (2.5–2.8) is well above its median (1.8).
+  - **Bands 9 against 8:** no clear winner. B is better on most lobe medians, A on the
+    aorta, pulmonary trunk and trachea means. Per subject, A beats B on 8–20 of 26
+    depending on the structure.
