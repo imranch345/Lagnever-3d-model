@@ -1326,3 +1326,26 @@ data); code at `8fc2d04` + `f1bdcd4`.
     - test resize on several subjects, not only s0029, which is an extreme subject;
     - before that test, state a tolerance for volume changes within decoding noise,
       measured from repeated decodes, so that it is not chosen to fit a result.
+- **Generation on chest data v2 (trachea cropped), run A:** 64% valid (from 58%). Trachea
+  failures fell from 16 to 12 of 50, but the median sampled trachea is still 50 mL against
+  34 mL real.
+- **Is class weighting inflating rare structures?** On 6 held-out fits, decoded ÷ true
+  volume (median):
+  - **plain decoding:** chambers, myocardium, aorta and lobes are 1.00–1.03, so there is
+    no general inflation. The IVC is 1.12 and **the trachea 1.49**.
+  - **full logit adjustment** (subtracting log class weight): everything shrinks to
+    0.89–0.98 and the IVC to 0.77, while the trachea is still 1.09. This over-corrects, so
+    it is not the fix.
+- **Where the extra trachea is:** neither below the carina nor above. On 4 held-out
+  subjects, 5–16 mL of it lies within 4 mm of the true wall, where the truth is "nothing".
+  The decoded tube is too thick (s0037: 22.8 mL true, 45.7 mL decoded).
+  - **Reading.** The trachea is surrounded mainly by "nothing" (class weight 0.19) and is
+    itself heavily weighted (1.70). A fuzzy thin tube's boundary therefore drifts outward
+    into the cheap class. Chambers border classes of similar weight and do not drift.
+- **Planned fix, not yet run: per-class logit offsets calibrated on training subjects.**
+  Learn a bias per class so that decoded volumes match true volumes on training subjects
+  (their own codes, within each subject's lung slab). Then test on held-out subjects that
+  played no part in the calibration. Saved as a calibrated checkpoint, so evaluation,
+  generation and resize use it unchanged. The alternative, retraining with weaker class
+  weights, costs a GPU run.
+- **Paused** for the night. No VM exists; nothing is running.
