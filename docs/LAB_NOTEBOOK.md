@@ -1276,3 +1276,28 @@ data); code at `8fc2d04` + `f1bdcd4`.
         the field-of-view edges.
 
       To be decided after the re-run with crops.
+
+## 2026-10-20 (00:45) — IVC crop works; trachea cropped too; resize on the chest model
+
+- **Generation with decoding crops** (aorta, IVC), 50 samples, real-anatomy limits:
+  - **run A 58%** (from 44%), **run B 48%** (from 34%);
+  - IVC failures fell from 21 to 7 of 50;
+  - **the trachea is now the main failure:** 16 (A) and 19 (B) samples, of which 12 and
+    15 fail on the trachea alone.
+- **The trachea is now cropped as well** (`EXTRA_CROPS`). Chest data v2 records its crops in
+  the manifest.
+  - The trachea within the lungs' extent is barely smaller than the whole label: median
+    34.2 against 34.7 mL. So the decoded trachea's excess (56 mL) is not only upward growth
+    above the scan; it is also wider.
+  - Level 1 does not crop the trachea, so evaluation and novelty compare it only within
+    the lungs' slab, on both meshes. Real-anatomy limits for v2: trachea 2.1%, aorta 3.3%,
+    IVC 1.1%.
+- **Resize on the chest model (run A), first look:** LV +15%, prior 0.1, myocardium grown
+  as a wall (factor²), the other chambers kept.
+  - **The field reached +14.9% size with no stray failure:** the walls held.
+  - The only failure was the right middle lobe at 867 mL against its limit of 866: 1 mL,
+    under the baseline rule.
+  - **That look is not trusted.** Both resizes ran at once on the M2's GPU while a Blender
+    render (another project of the user's) was also using it. Metal reported "GPU Hang"
+    errors, and a later rerun produced garbage (2.4 million points claimed twice). Resize
+    is being rerun alone, on the CPU, before any conclusion.
