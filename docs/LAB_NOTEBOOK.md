@@ -1301,3 +1301,28 @@ data); code at `8fc2d04` + `f1bdcd4`.
     render (another project of the user's) was also using it. Metal reported "GPU Hang"
     errors, and a later rerun produced garbage (2.4 million points claimed twice). Resize
     is being rerun alone, on the CPU, before any conclusion.
+- **Resize on the chest model (run A), clean rerun on the CPU.** LV +15% on s0029, prior 0.1,
+  300 steps, myocardium grown as a wall, LA/RA/RV kept, real-anatomy limits. The +15%
+  attempt reproduced the GPU first look exactly, so that look was not an artefact.
+
+  | asked | LV size reached | verdict | neighbours (volume change) |
+  | --- | --- | --- | --- |
+  | +15% | +14.9% (+51.8% volume) | refused: right middle lobe 867 mL above its 866 mL limit | myocardium +55%, LA +2%, RA −4%, RV +2%, vessels ≤ 1%, lobes ≤ 1.8% |
+  | +7% | +7.0% | refused: myocardium sheds 1.7% (limit 1.0%) | – |
+  | +3% | +3.0% | passes | – |
+  | +5% | +5.0% | passes | – |
+  | **+6%** | **+6.0% (+19.1% volume)** | **passes** | LA +4%, RA +6%, RV +6%, myocardium +12% |
+
+  - **Largest passing change: +6.0%,** against +2% for the seven-class field under the
+    same rule and +2% for Level 2a.
+  - **At +15% the walls held** (no stray failure) and the vessels and lobes barely moved.
+    The refusal was 1 mL: s0029's middle lobe starts at 865.9 mL, the training maximum
+    (s0029 has the largest middle lobe of all 105). Under the baseline rule, any growth
+    there fails. It stays a refusal; no rule is changed after the fact to pass it.
+  - **Not monotonic:** +7% breaks the myocardium where +15% does not. The optimiser takes
+    a different path for each target, so bisection gives a valid lower bound, not the
+    true maximum.
+  - **Next:**
+    - test resize on several subjects, not only s0029, which is an extreme subject;
+    - before that test, state a tolerance for volume changes within decoding noise,
+      measured from repeated decodes, so that it is not chosen to fit a result.
