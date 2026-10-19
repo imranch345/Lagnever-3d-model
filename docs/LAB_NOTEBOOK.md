@@ -1191,3 +1191,30 @@ data); code at `8fc2d04` + `f1bdcd4`.
     checking refused its new key. The launcher now forgets a reused IP's old key for a VM
     it has just created, and gained a `deploy` step for an existing VM.
   - Both runs resumed exactly at step 2001.
+
+## 2026-10-19 (18:50) — Stage 2 chest runs trained; real-anatomy limits for the chest
+
+- **Real-anatomy stray limits for the 14 chest classes,** computed on the evaluation grid
+  and cached in `datasets/processed/level2b-chest/real_stray.json`.
+  - Every chamber, the myocardium, the IVC and the lobes are one piece in every real
+    subject: the worst stray share is at most 1.8%, and the median is 0.
+  - The aorta (worst 7.1%) and the pulmonary trunk (worst 3.8%) are the exceptions. The
+    thorax crop at the lungs' apex can cut the aortic arch, so a real cropped aorta can
+    come in two parts.
+- **The interim check found no pipeline bug.** Run A at step 12,000 was evaluated on 4
+  held-out subjects, with the floor and Level 2a. Medians, in mm:
+  - chambers LV 0.58, myocardium 0.59, RV 0.83, LA 1.02, already below Level 2a (0.76,
+    0.88, 0.96, 1.17);
+  - lobes 1.8–2.4, pulmonary trunk 1.28, aorta 2.66, IVC 4.09, trachea 4.53;
+  - floor 0.34–0.37 for most structures; 0.81 for the RA, where the IVC label overlaps it.
+- **The trachea's upper end varies.** Among 10 held-out subjects it reaches −12 to +18 mm
+  above the lung apex; in one it touches the top of the scan. This adds some unpredictable
+  length, though not on its own the 4.5 mm interim distance.
+- **Training finished** at 13:14 UTC: 40,000 steps for both runs, after two spot
+  preemptions and the move to on-demand.
+  - **Run A (bands 8):** final probe accuracy 0.888.
+  - **Run B (bands 9):** final probe accuracy 0.887.
+  - Training curves were nearly identical throughout. The VM was deleted at 13:15:56;
+    session spend is about $3.05.
+- **Held-out evaluation of both runs is running,** with the floor, no smooth meshing, and
+  Level 2a for the heart.
