@@ -242,8 +242,15 @@ def evaluate(
     fit_weighted: bool = False,
     spacing_mm: float = 2.0,
     device: str | None = None,
+    raw_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Per held-out subject and structure: surface distance and point Dice, for 2b and 2a."""
+    """Per held-out subject and structure: surface distance and point Dice, for 2b and 2a.
+
+    With ``raw_root`` (the CT label volumes), each structure also gets ``surface_mm_floor``:
+    the subject's true labels decoded on the same grid and meshed the same way, scored by
+    the same rule. No field can do better, and a structure with no Level 2a model is read
+    against this floor.
+    """
     run_device = pick_device(device)
     field, checkpoint = load_checkpoint(checkpoint_path, run_device)
     classes = list(checkpoint["classes"][1:])
@@ -307,6 +314,18 @@ def evaluate(
                 if rebuilt is not None:
                     row["surface_mm_2a"] = round(surface_distance(rebuilt, real[entity]), 3)
             entry[entity] = row
+        if raw_root is not None:
+            from fields.data import labels_on_grid
+
+            truth = labels_on_grid(
+                raw_root / subject, manifest["stats"][subject]["frame"], grid.points(), classes
+            )
+            perfect = label_meshes(truth.reshape(grid.shape), grid, classes)
+            for entity in classes:
+                if entity in perfect and entity in real:
+                    entry[entity]["surface_mm_floor"] = round(
+                        surface_distance(perfect[entity], real[entity]), 3
+                    )
         entry["seconds"] = round(time.time() - started, 1)
         results[subject] = entry
         print(f"evaluated {subject} in {entry['seconds']} s", flush=True)
@@ -344,6 +363,7 @@ def _level2a(level2a_dir: Path) -> dict[str, Any]:
 
 
 SUMMARISED = (
+    "surface_mm_floor",
     "surface_mm_2b",
     "surface_mm_2b_smooth",
     "surface_mm_2b_clean",
@@ -377,6 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--fit-steps", type=int, default=300)
     parser.add_argument("--fit-weighted", action="store_true", help="training's class weights")
+    parser.add_argument("--floor", type=Path, default=None, help="CT labels: score the floor")
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
@@ -389,6 +410,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         level2a_dir=args.level2a,
         fit_steps=args.fit_steps,
         fit_weighted=args.fit_weighted,
+        raw_root=args.floor,
         spacing_mm=args.spacing,
         device=args.device,
     )

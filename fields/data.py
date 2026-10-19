@@ -53,6 +53,7 @@ __all__ = [
     "CHEST",
     "CLASSES",
     "PRESETS",
+    "labels_on_grid",
     "Frame",
     "build",
     "frame_for",
@@ -139,6 +140,34 @@ def label_volume(
         labels[union] = index
     assert labels is not None and affine is not None
     return labels, affine, overlaps
+
+
+def labels_on_grid(
+    subject_dir: Path,
+    frame: Any,
+    points_aligned: npt.ArrayLike,
+    classes: Sequence[str] = CLASSES,
+    label_map: LabelMap | None = None,
+) -> npt.NDArray[np.uint8]:
+    """The subject's true label at each aligned-frame point: its nearest CT voxel, 0 outside.
+
+    ``frame`` is a ``Frame`` or its manifest form (``origin_ras_mm`` and ``rigid``). This is
+    ``to_aligned`` run backwards, so it is what a perfect field would decode.
+    """
+    if not isinstance(frame, Frame):
+        frame = Frame(
+            origin_ras_mm=np.asarray(frame["origin_ras_mm"], dtype=np.float64),
+            rigid=np.asarray(frame["rigid"], dtype=np.float64),
+        )
+    labels, affine, _ = label_volume(subject_dir, classes, label_map)
+    aligned = np.asarray(points_aligned, dtype=np.float64)
+    viewer = (aligned - frame.rigid[:3, 3]) @ frame.rigid[:3, :3]
+    ras = viewer @ RAS_TO_VIEWER + frame.origin_ras_mm
+    ijk = np.rint(nib.affines.apply_affine(np.linalg.inv(affine), ras)).astype(np.int64)
+    inside = np.all((ijk >= 0) & (ijk < np.asarray(labels.shape)), axis=1)
+    truth = np.zeros(len(ijk), dtype=np.uint8)
+    truth[inside] = labels[ijk[inside, 0], ijk[inside, 1], ijk[inside, 2]]
+    return truth
 
 
 def frame_for(scene_dir: Path, reference_heart: Any, seed: int = 0) -> Frame:

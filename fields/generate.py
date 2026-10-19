@@ -171,23 +171,12 @@ def real_stray(
     classes: Sequence[str],
 ) -> dict[str, list[float]]:
     """Per structure, each real subject's stray share: its CT labels on ``grid``, then cleaned."""
-    import nibabel as nib
-
-    from assets.meshes import RAS_TO_VIEWER
-    from fields.data import label_volume
+    from fields.data import labels_on_grid
 
     shares: dict[str, list[float]] = {e: [] for e in classes}
-    aligned = grid.points().astype(np.float64)
+    aligned = grid.points()
     for subject in subjects:
-        labels, affine, _ = label_volume(raw_root / subject, classes)
-        frame = stats[subject]["frame"]
-        rigid = np.asarray(frame["rigid"], dtype=np.float64)
-        viewer = (aligned - rigid[:3, 3]) @ rigid[:3, :3]
-        ras = viewer @ RAS_TO_VIEWER + np.asarray(frame["origin_ras_mm"], dtype=np.float64)
-        ijk = np.rint(nib.affines.apply_affine(np.linalg.inv(affine), ras)).astype(np.int64)
-        inside = np.all((ijk >= 0) & (ijk < np.asarray(labels.shape)), axis=1)
-        truth = np.zeros(len(ijk), dtype=np.uint8)
-        truth[inside] = labels[ijk[inside, 0], ijk[inside, 1], ijk[inside, 2]]
+        truth = labels_on_grid(raw_root / subject, stats[subject]["frame"], aligned, classes)
         volume = truth.reshape(grid.shape)
         cleaned, _ = keep_largest(volume, len(classes) + 1)
         for index, entity in enumerate(classes, start=1):

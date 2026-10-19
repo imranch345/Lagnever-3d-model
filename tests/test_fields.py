@@ -72,6 +72,22 @@ class TestPoints:
         hearts = scene["heart"].contains(points[nothing]).mean()
         assert hearts < 0.05
 
+    def test_labels_on_grid_inverts_the_frame(self, phantom, tmp_path) -> None:
+        """Looking the stored points up in the CT gives back their stored labels."""
+        from fields import data
+
+        raw_root, scenes = phantom
+        reference, data.REFERENCE = data.REFERENCE, "p0"
+        try:
+            manifest = data.build(raw_root, scenes, tmp_path, n_points=5000, split_from=None)
+        finally:
+            data.REFERENCE = reference
+        stored = np.load(tmp_path / "points" / "p0.npz")
+        again = data.labels_on_grid(
+            raw_root / "p0", manifest["stats"]["p0"]["frame"], stored["points"]
+        )
+        assert (again == stored["labels"]).mean() > 0.99
+
     def test_sampling_is_reproducible(self, phantom) -> None:
         """Same seed, same points and labels; another seed, different points."""
         from fields import data
