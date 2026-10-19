@@ -1171,3 +1171,23 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **B:** A with Fourier bands 9, finer detail for thin walls.
 
   The first VM was preempted 41 s after creation. The user then paused for the night.
+
+## 2026-10-19 (15:20) — Leading-axes sampling refuted; stage 2 training under way
+
+- **Hypothesis:** run 6's invalid samples (mostly lungs above the training maximum) come
+  from the weak code axes, which 105 subjects estimate poorly.
+  - **Test:** sample from only the leading axes that explain 95% of the variance
+    (`--variance 0.95`), with the same 50 seeds and the same real-anatomy limits.
+  - **Result: refuted.** The pass rate is 86% against 88% with all axes. Volume failures
+    are unchanged at 10%; novelty is 4.40 against 4.43 mm.
+  - **Reading.** The oversized lungs lie along the main axes. A 1 SD step there decodes to
+    lungs larger than any training subject's, so the decoded volume grows faster than
+    linearly along that axis.
+  - **For now:** the product already shows only valid draws. Calibrating the sampler's
+    spread per part is a candidate fix, not yet tried.
+- **Stage 2 GPU session (spot, then on-demand after two preemptions; cap $5):**
+  - **First VM:** created 09:19 UTC, preempted at 09:33 after both runs saved step 2000.
+  - **Replacement:** created 09:35 in the same zone, on the same IP. Strict host-key
+    checking refused its new key. The launcher now forgets a reused IP's old key for a VM
+    it has just created, and gained a `deploy` step for an existing VM.
+  - Both runs resumed exactly at step 2001.
