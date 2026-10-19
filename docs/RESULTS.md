@@ -61,6 +61,7 @@ Step 22 gives the first pair of runs that share a starting state and differ in o
 | P5 | An open-vocabulary language layer with a safety boundary. | Rules first; otherwise Claude emits a program restricted by a closed schema of operations and entity ids, validated before anything runs. Off by default; tested without network calls | ADR-L1-005, `language/` |
 | P6 | **Generated anatomy from learned shape models** (Level 2a): statistical models of the four chambers, the myocardium and both lungs, learned from 131 real CTs, draw new thoraxes. | Held-out reconstruction error: 1.1–2.1 mm for the chambers, 5.1–6.3 mm for the lungs, 3.2–4.6× better than the mean shape on 26 unseen subjects. **Validity:** 50 of 50 samples at 0.5 SD pass checks calibrated on real anatomy; at 1 SD, 78% pass, against 90.5% of real held-out subjects. Shown samples are drawn at 1 SD and kept only if valid. They are as novel as a new real person: 8.8 mm against 9.1 mm to the nearest training subject | `LEVEL_2A_REPORT.md` §5–6, `evidence/2026-10-16_generated_thorax_seed1.jpg` |
 | P7 | **One structure resized by a sentence**, within its own shape model, with an honest refusal. | On a real heart, "make the left ventricle 15% smaller" is applied: −15.0% size, −38.7% volume, 0.6 mm from plain scaling, every other mesh unchanged. Growth beyond 2–6% is refused because neighbours would be penetrated, and the reply names the largest change that passes | `LEVEL_2A_REPORT.md` §7, ADR-L2-001, `evidence/2026-10-16_resize_s0029_*` |
+| P8 | **A neural model of the whole thorax** (Level 2b): one network labels every point of a thorax, with one code for the heart and one for the lungs. Two structures can never overlap, by construction. Trained on rented GPUs for about $2. | **Fit to 26 unseen people**, with Level 2a scored by the same rule (median surface distance): LV 0.57 mm against 2a's 0.82; myocardium 0.62 against 0.90; RV 0.80 against 1.20; LA 0.89 against 1.25; RA 1.10 against 1.43; lungs 2.56 and 2.86 against 3.58 and 4.05. **Better than Level 2a on every structure**, and on 21–26 of the 26 people per structure. The yardstick's own floor is 0.35–0.47 mm. **Generation:** 88% of 1 SD draws pass checks calibrated on real anatomy, unfiltered (Level 2a: 78%). No point is claimed twice in any sample. Samples are 94% as novel as a new real person. The viewer shows only valid draws. **Resize:** heart edits leave the lungs untouched. Under real-anatomy limits the LV grows by +2%, as in Level 2a, because the stretched myocardium breaks first; work continues. | `LAB_NOTEBOOK.md` 2026-10-18/19, `LEVEL_2B_SPEND.md`, `evidence/2026-10-18_level2b_*` |
 
 ## How the results are protected
 
@@ -85,10 +86,17 @@ These practices are part of the claim. They are why the numbers can be trusted.
 
 ## Resources used
 
-* **Compute.** Everything so far has run on one laptop CPU. No GPU, no cloud spend.
+* **Compute.**
+  - Research and Levels 1–2a ran on one laptop.
+  - Level 2b trains on rented NVIDIA L4 GPUs (Google Cloud, spot). Spend so far is about
+    $1.65 of a $700 budget, every session logged in
+    [`LEVEL_2B_SPEND.md`](LEVEL_2B_SPEND.md).
+  - A GPU step runs about 21× faster than on the laptop.
 * **Data.** Public, openly licensed CT segmentations. No patient data was collected.
-* **Paid services.** None so far. The Claude language path needs an API key and has not been
-  run against the live API.
+* **Paid services.** The Claude language path (`claude-opus-5-5`) runs with the user's own
+  API key, kept in a private file and never printed. Its first live test gave 11 of 11
+  requests the intended result, including Hinglish ("dil ke left ventricle ko 10% chhota
+  karo") and refusals for absent anatomy (notebook, 2026-10-18).
 
 ## Limitations (stated plainly)
 
@@ -98,9 +106,11 @@ These practices are part of the claim. They are why the numbers can be trusted.
   measurements, not clinical values, and have not been reviewed by a clinician.
 * The cardiac-cycle animation is semantic, a sequence of named phases. It is not a
   physiological simulation.
-* Level 2a generation keeps only samples that pass the validity checks (80% of 1 SD draws), so
-  the shown distribution is truncated. Resizing can grow a structure by only a few percent, because neighbours do not deform. Both point to a
-  deformation-aware model (Stage 2b), which needs a GPU budget decision.
+* Generation keeps only samples that pass the validity checks: about 80% of Level 2a's 1 SD
+  draws and 88% of Level 2b's. The shown distribution is therefore truncated.
+* Growing one chamber is still limited to a few percent in both models. Level 2b's field can
+  make the LV 15% larger, but the stretched myocardium breaks before it gets there, and the
+  checks refuse that.
 * Level 2a shape models are linear: they vary shape the way the training population did.
   They cover five heart structures and the two lungs, not the vessels or the lobes. Lung
   templates miss thin wedges and recesses (3–8% of the surface). The right-lung template
@@ -110,6 +120,7 @@ These practices are part of the claim. They are why the numbers can be trusted.
 
 | what | where |
 | --- | --- |
+| Roadmap to "any body part on request" | [`ROADMAP.md`](ROADMAP.md) |
 | Dated record of all work | [`LAB_NOTEBOOK.md`](LAB_NOTEBOOK.md) |
 | Screenshots with captions and reproduce commands | [`evidence/`](evidence/README.md) |
 | Level 1 plan and status | [`LEVEL_1_PLAN.md`](LEVEL_1_PLAN.md) |
