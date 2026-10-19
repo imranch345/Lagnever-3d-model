@@ -13,7 +13,8 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.43 (14:36–16:02 UTC) | ~0.50 (estimate) | M2 | third session: run 4 finished, run 5 to step 28000, run 6 started; **preempted** at 16:02 | **~1.65** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 1.47 (16:04–17:32 UTC) | ~0.50 (estimate) | M2 | fourth session: runs 5 and 6 finished; VM deleted | **~2.15** |
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.01 (22:56:58–22:57:39 UTC) | ~0.01 | M2/stage 2 | stage 2 chest runs A and B, approved by the user (≤ $5): **preempted 41 s after creation**, before training began; the user then paused for the night | **~2.16** |
-| 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | running since 09:19 UTC | pending | stage 2 | chest runs A (bands 8) and B (bands 9), approved by the user: spot first, on-demand after two preemptions or no capacity; cap $5 | pending |
+| 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.23 + 0.28 (09:19–09:33, 09:35–09:52 UTC) | ~0.20 (estimate) | stage 2 | chest runs A and B; **preempted twice**, saved at step 2000 | **~2.36** |
+| 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | running since 09:55 UTC | pending (~$0.85/h) | stage 2 | after two preemptions, per the user's rule: runs A and B resumed from step 2000 | pending |
 
 ## Sessions
 
@@ -83,3 +84,7 @@ provider's own billing figures. A cap is a hard stop.
 - **Launch:** created at 09:19 UTC in us-central1-a by the new `tools/gpu_session.sh`,
   after us-east1-b/c/d had no spot capacity. Runs A and B started together and use 12 GB
   of the L4.
+- **Preempted twice** (09:33 and 09:52 UTC). The first replacement reused the same IP; the
+  launcher now handles that. As the user's rule says, the session moved to on-demand: a VM
+  created at 09:55 UTC in us-central1-b, after four zones had no on-demand capacity either.
+  Both runs resumed from step 2000. Spend stays under the $5 session cap.
