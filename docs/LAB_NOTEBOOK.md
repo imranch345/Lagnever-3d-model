@@ -1250,3 +1250,29 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Bands 9 against 8:** no clear winner. B is better on most lobe medians, A on the
     aorta, pulmonary trunk and trachea means. Per subject, A beats B on 8–20 of 26
     depending on the structure.
+- **Stage 2 generation, first pass:** 50 samples at 1 SD, real-anatomy limits.
+  - **44% valid (run A), 34% (run B),** against 88% for run 6's seven classes.
+  - **Novelty:** 5.75 / 5.59 mm against 6.23 mm for a new real person.
+  - **Failures are concentrated:** the IVC fails in 21 of 50 samples and the trachea in
+    16–19. The heart and lobes rarely fail. Both are too large: medians of 52 mL (IVC)
+    and 56 mL (trachea), against training medians of 34 and 35.
+- **Diagnosis: two different causes.**
+  - **IVC: a missing crop at decoding.** The data labels the IVC (and aorta) only within
+    the lungs' extent; below it, a training point says "nothing" only within 10 mm of the
+    lowest structure. Further down, the field was never taught anything and continues the
+    IVC to the grid's edge: seed 0's lungs start at y = 35, its IVC at y = 6. On held-out
+    s0037, the decoded IVC runs 26 mm below the true one.
+    - **Fix:** `apply_crops` cuts decoded volumes to the reference's extent exactly as the
+      data was cut, in evaluation, generation and resize. That is the structure's own
+      definition, not a cosmetic trim.
+  - **Trachea: the partial-scan problem, already.** The decoded trachea extends 10–20 mm
+    above the true one. But the true top is often just the scan's edge: s0011's scan ends
+    9 mm above its trachea. The field continues the trachea upward as anatomy does; the
+    reference is cut by the field of view. The roadmap names this "not in the scan is not
+    nothing" problem for stage 3, and it arrives here first.
+    - **Options:**
+      - crop the trachea to the lungs' extent in both the data and the evaluation;
+      - teach the field where each scan ends, for example by weighting out points near
+        the field-of-view edges.
+
+      To be decided after the re-run with crops.
