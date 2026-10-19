@@ -243,8 +243,12 @@ def evaluate(
     spacing_mm: float = 2.0,
     device: str | None = None,
     raw_root: Path | None = None,
+    smooth_meshes: bool = True,
 ) -> dict[str, Any]:
     """Per held-out subject and structure: surface distance and point Dice, for 2b and 2a.
+
+    ``smooth_meshes=False`` skips the margin meshing, which never beat the binary one
+    (notebook, 2026-10-18), and saves a third of the time with many structures.
 
     With ``raw_root`` (the CT label volumes), each structure also gets ``surface_mm_floor``:
     the subject's true labels decoded on the same grid and meshed the same way, scored by
@@ -285,7 +289,7 @@ def evaluate(
         margins = decode_margins(field, code, grid)
         volume = margins.argmax(axis=0).astype(np.uint8)
         meshes = label_meshes(volume, grid, classes)
-        smooth = label_meshes(volume, grid, classes, margins)
+        smooth = label_meshes(volume, grid, classes, margins) if smooth_meshes else {}
         cleaned, pieces = keep_largest(volume, len(classes) + 1)
         clean = label_meshes(cleaned, grid, classes)
         real = _real_meshes(scenes_root, subject, rigid)
@@ -305,9 +309,10 @@ def evaluate(
             }
             if entity in meshes and entity in real:
                 row["surface_mm_2b"] = round(surface_distance(meshes[entity], real[entity]), 3)
-                row["surface_mm_2b_smooth"] = round(
-                    surface_distance(smooth[entity], real[entity]), 3
-                )
+                if entity in smooth:
+                    row["surface_mm_2b_smooth"] = round(
+                        surface_distance(smooth[entity], real[entity]), 3
+                    )
                 row["surface_mm_2b_clean"] = round(surface_distance(clean[entity], real[entity]), 3)
             if models_2a is not None and entity in models_2a and entity in real:
                 rebuilt = models_2a[entity](subject)
@@ -398,6 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fit-steps", type=int, default=300)
     parser.add_argument("--fit-weighted", action="store_true", help="training's class weights")
     parser.add_argument("--floor", type=Path, default=None, help="CT labels: score the floor")
+    parser.add_argument("--no-smooth", action="store_true", help="skip the margin meshing")
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", type=Path, required=True)
@@ -411,6 +417,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         fit_steps=args.fit_steps,
         fit_weighted=args.fit_weighted,
         raw_root=args.floor,
+        smooth_meshes=not args.no_smooth,
         spacing_mm=args.spacing,
         device=args.device,
     )
