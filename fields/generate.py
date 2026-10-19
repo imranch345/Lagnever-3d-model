@@ -58,6 +58,7 @@ from scipy.spatial import cKDTree  # type: ignore[import-untyped]
 from assets.meshes import VIEWER_FRAME, mask_to_mesh, side_report
 from assets.quality import assess
 from awr.ontology import AnatomyOntology, load_ontology
+from fields.data import EXTRA_CROPS
 from fields.evaluate import (
     Grid,
     _real_meshes,
@@ -66,6 +67,7 @@ from fields.evaluate import (
     keep_largest,
     label_meshes,
     load_checkpoint,
+    lung_slab,
 )
 from fields.model import Field, pick_device
 
@@ -256,12 +258,22 @@ class Reference:
         for subject in self.subjects:
             rigid = np.asarray(frames[subject]["frame"]["rigid"], dtype=np.float64)
             real = _real_meshes(scenes_root, subject, rigid)
-            self.points[subject] = {e: _surface(real[e]) for e in self.classes if e in real}
+            slab = lung_slab(real)
+            self.points[subject] = {
+                e: _surface(real[e], slab if e in EXTRA_CROPS else None)
+                for e in self.classes
+                if e in real
+            }
             self.trees[subject] = {e: cKDTree(p) for e, p in self.points[subject].items()}
 
     def novelty(self, meshes: Mapping[str, trimesh.Trimesh]) -> tuple[float, str]:
         """The mean over structures of the symmetric distance to the nearest training subject."""
-        mine = {e: _surface(meshes[e]) for e in self.classes if e in meshes}
+        slab = lung_slab(meshes)
+        mine = {
+            e: _surface(meshes[e], slab if e in EXTRA_CROPS else None)
+            for e in self.classes
+            if e in meshes
+        }
         my_trees = {e: cKDTree(p) for e, p in mine.items()}
         best, nearest = np.inf, ""
         for subject in self.subjects:
@@ -280,8 +292,13 @@ class Reference:
         return best, nearest
 
 
-def _surface(mesh: trimesh.Trimesh) -> FloatArray:
+def _surface(mesh: trimesh.Trimesh, slab: tuple[float, float] | None = None) -> FloatArray:
     points, _ = trimesh.sample.sample_surface(mesh, SURFACE_SAMPLES, seed=0)
+    points = np.asarray(points, dtype=np.float64)
+    if slab is not None:
+        inside = (points[:, 1] >= slab[0] + 2.0) & (points[:, 1] <= slab[1] - 2.0)
+        if inside.any():
+            points = points[inside]
     return np.asarray(points, dtype=np.float64)
 
 

@@ -7,7 +7,9 @@ For each subject, the label masks of the modelled structures become one label vo
 - a lung is the union of its lobes, as in Level 1;
 - a structure with a crop is cropped as Level 1 crops it. The aorta and the IVC keep only
   the slices within the lungs' extent, so a vessel's length does not depend on how far the
-  scan happened to reach.
+  scan happened to reach. Level 2b adds the trachea (``EXTRA_CROPS``): its upper end is
+  often where the scan stops, not where the trachea does, so it too is "the thoracic
+  part".
 
 Points are drawn from that volume:
 
@@ -52,7 +54,9 @@ from shapes.register import load_scene, rigid_to
 __all__ = [
     "CHEST",
     "CLASSES",
+    "EXTRA_CROPS",
     "PRESETS",
+    "crop_of",
     "labels_on_grid",
     "Frame",
     "build",
@@ -83,6 +87,15 @@ CHEST: tuple[str, ...] = (
     "respiratory.trachea",
 )
 PRESETS: dict[str, tuple[str, ...]] = {"heart-lungs": CLASSES, "chest": CHEST}
+#: Crops Level 2b adds to the label map's, for structures a scan's edge often cuts.
+EXTRA_CROPS: dict[str, str] = {"respiratory.trachea": "thorax"}
+
+
+def crop_of(entity: str, label_map: LabelMap) -> str | None:
+    """The crop a structure gets in Level 2b: the label map's, else ``EXTRA_CROPS``."""
+    return label_map.for_entity(entity).crop or EXTRA_CROPS.get(entity)
+
+
 REFERENCE = "s0029"
 
 
@@ -130,11 +143,12 @@ def label_volume(
     for index, entity in enumerate(classes, start=1):
         entry = label_map.for_entity(entity)
         union = np.logical_or.reduce([read(name) for name in entry.labels])
-        if entry.crop is not None:
-            if entry.crop not in references:
-                names = label_map.crops[entry.crop].reference_labels
-                references[entry.crop] = np.logical_or.reduce([read(n) for n in names])
-            union = _crop_to_extent(union, references[entry.crop])
+        crop = crop_of(entity, label_map)
+        if crop is not None:
+            if crop not in references:
+                names = label_map.crops[crop].reference_labels
+                references[crop] = np.logical_or.reduce([read(n) for n in names])
+            union = _crop_to_extent(union, references[crop])
         assert labels is not None
         overlaps += int(np.count_nonzero(union & (labels > 0) & (labels != index)))
         labels[union] = index
@@ -282,6 +296,7 @@ def build(
         "frame": "Level 1 viewer frame (heart-shell centroid origin), aligned rigidly onto "
         f"{REFERENCE} by the heart shell as in Level 2a",
         "reference": REFERENCE,
+        "crops": {c: crop for c in classes if (crop := crop_of(c, label_map)) is not None},
         "subjects": subjects,
         "split": split,
         "source": asdict(label_map.source),

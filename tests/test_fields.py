@@ -145,6 +145,34 @@ class TestChest:
         assert np.flatnonzero(cut[1, :, 1] == 1).tolist() == [3, 4, 5]
         assert (cut[2, 0:2, 2] == 3).all() and (cut == 2).sum() == 6
 
+    def test_a_slab_compares_a_cut_tube_with_an_uncut_one(self) -> None:
+        """A tube cut to the slab matches the full tube within it; without the slab it does not."""
+        import trimesh
+
+        from fields.evaluate import surface_distance
+
+        def tube(height: float) -> trimesh.Trimesh:
+            mesh = trimesh.creation.cylinder(radius=8.0, height=height, sections=64)
+            mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+            return mesh
+
+        long, short = tube(80.0), tube(20.0)
+        assert surface_distance(short, long, slab=(-10.0, 10.0)) < 0.3
+        assert surface_distance(short, long) > 3.0
+
+    def test_the_trachea_is_cropped_in_the_data(self, phantom) -> None:
+        """Level 2b crops the trachea to the lungs' slices as it crops the vessels."""
+        from fields import data
+
+        raw_root, _ = phantom
+        labels, _, _ = data.label_volume(raw_root / "p0", data.CHEST)
+        lobes = [data.CHEST.index(c) + 1 for c in data.CHEST if "lobe" in c]
+        lung_slices = np.flatnonzero(np.isin(labels, lobes).any(axis=(0, 1)))
+        kept = np.flatnonzero(
+            (labels == data.CHEST.index("respiratory.trachea") + 1).any(axis=(0, 1))
+        )
+        assert len(kept) and kept.max() <= lung_slices.max() and kept.min() >= lung_slices.min()
+
     def test_parts_can_group_several_prefixes(self, tmp_path) -> None:
         """'a|b' is one part; the first matching part wins."""
         from fields.train import part_indices

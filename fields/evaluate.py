@@ -49,6 +49,7 @@ from scipy import ndimage  # type: ignore[import-untyped]
 from skimage import measure
 from torch.nn import functional
 
+from fields.data import EXTRA_CROPS
 from fields.model import Field, FieldConfig, make_field, pick_device
 from fields.train import weights_from_counts
 from shapes.register import load_scene
@@ -62,6 +63,7 @@ __all__ = [
     "keep_largest",
     "label_meshes",
     "load_checkpoint",
+    "lung_slab",
     "surface_distance",
 ]
 
@@ -182,12 +184,14 @@ def keep_largest(volume: np.ndarray, n_classes: int) -> tuple[np.ndarray, list[i
 def apply_crops(volume: np.ndarray, classes: Sequence[str]) -> np.ndarray:
     """Cut classes that the label map crops to their reference's extent, as the data was cut.
 
-    The aorta and the IVC are labelled only within the lungs' superior–inferior extent
-    (``fields.data``, as in Level 1). Where no training point ever was, outside that
-    extent, a decoded field can continue them. Decoded volumes are therefore cut the same
-    way, along the aligned frame's superior axis (y). Classes without a crop are unchanged.
+    The aorta, the IVC and the trachea are labelled only within the lungs'
+    superior–inferior extent (``fields.data.crop_of``). Where no training point ever was,
+    outside that extent, a decoded field can continue them. Decoded volumes are therefore
+    cut the same way, along the aligned frame's superior axis (y). Classes without a crop
+    are unchanged.
     """
     from assets.labels import DEFAULT_LABEL_MAP, load_label_map
+    from fields.data import crop_of
 
     label_map = load_label_map(DEFAULT_LABEL_MAP)
     known = set(label_map.entity_ids())
@@ -195,10 +199,10 @@ def apply_crops(volume: np.ndarray, classes: Sequence[str]) -> np.ndarray:
     for index, entity in enumerate(classes, start=1):
         if entity not in known:
             continue
-        entry = label_map.for_entity(entity)
-        if entry.crop is None:
+        crop = crop_of(entity, label_map)
+        if crop is None:
             continue
-        wanted = set(label_map.crops[entry.crop].reference_labels)
+        wanted = set(label_map.crops[crop].reference_labels)
         reference = [
             k
             for k, other in enumerate(classes, start=1)
@@ -243,10 +247,28 @@ def label_meshes(
     return meshes
 
 
-def surface_distance(a: trimesh.Trimesh, b: trimesh.Trimesh, samples: int = 4000) -> float:
-    """Symmetric mean surface distance in mm: the average of both directions."""
+def surface_distance(
+    a: trimesh.Trimesh,
+    b: trimesh.Trimesh,
+    samples: int = 4000,
+    slab: tuple[float, float] | None = None,
+    margin_mm: float = 2.0,
+) -> float:
+    """Symmetric mean surface distance in mm: the average of both directions.
+
+    With ``slab`` (low, high along y), only surface points strictly inside it (by
+    ``margin_mm``) are scored, on both meshes. A structure cropped to the lungs (the trachea,
+    whose reference Level 1 does not crop) is then compared over the same stretch, and the
+    flat faces where one mesh was cut never count against the other.
+    """
     pa, _ = trimesh.sample.sample_surface(a, samples, seed=0)
     pb, _ = trimesh.sample.sample_surface(b, samples, seed=1)
+    if slab is not None:
+        low, high = slab[0] + margin_mm, slab[1] - margin_mm
+        pa = pa[(pa[:, 1] >= low) & (pa[:, 1] <= high)]
+        pb = pb[(pb[:, 1] >= low) & (pb[:, 1] <= high)]
+        if len(pa) == 0 or len(pb) == 0:
+            return float("nan")
     _, d_ab, _ = trimesh.proximity.closest_point(b, pa)
     _, d_ba, _ = trimesh.proximity.closest_point(a, pb)
     return float((np.mean(d_ab) + np.mean(d_ba)) / 2.0)
@@ -259,6 +281,17 @@ def _real_meshes(scenes_root: Path, subject: str, rigid: FloatArray) -> dict[str
         moved.apply_transform(rigid)
         meshes[entity] = moved
     return meshes
+
+
+def lung_slab(meshes: Mapping[str, trimesh.Trimesh]) -> tuple[float, float] | None:
+    """The lowest and highest point of a thorax's lungs along the superior axis (y)."""
+    lungs = [m for e, m in meshes.items() if "lobe" in e or e.endswith("_lung")]
+    if not lungs:
+        return None
+    return (
+        min(float(m.vertices[:, 1].min()) for m in lungs),
+        max(float(m.vertices[:, 1].max()) for m in lungs),
+    )
 
 
 def _dice(predicted: np.ndarray, truth: np.ndarray, k: int) -> float | None:
@@ -329,6 +362,18 @@ def evaluate(
         cleaned, pieces = keep_largest(volume, len(classes) + 1)
         clean = label_meshes(cleaned, grid, classes)
         real = _real_meshes(scenes_root, subject, rigid)
+        slab = lung_slab(real)
+
+        def score(
+            mesh: trimesh.Trimesh,
+            entity: str,
+            real: dict[str, trimesh.Trimesh] = real,
+            slab: tuple[float, float] | None = slab,
+        ) -> float:
+            # Level 2b crops the trachea; its Level 1 reference is not cropped.
+            within = slab if entity in EXTRA_CROPS else None
+            return round(surface_distance(mesh, real[entity], slab=within), 3)
+
         predicted = (
             field(
                 torch.from_numpy(points[:50000]).unsqueeze(0).to(run_device), code.to(run_device)
@@ -344,16 +389,14 @@ def evaluate(
                 "pieces": pieces[index - 1],
             }
             if entity in meshes and entity in real:
-                row["surface_mm_2b"] = round(surface_distance(meshes[entity], real[entity]), 3)
+                row["surface_mm_2b"] = score(meshes[entity], entity)
                 if entity in smooth:
-                    row["surface_mm_2b_smooth"] = round(
-                        surface_distance(smooth[entity], real[entity]), 3
-                    )
-                row["surface_mm_2b_clean"] = round(surface_distance(clean[entity], real[entity]), 3)
+                    row["surface_mm_2b_smooth"] = score(smooth[entity], entity)
+                row["surface_mm_2b_clean"] = score(clean[entity], entity)
             if models_2a is not None and entity in models_2a and entity in real:
                 rebuilt = models_2a[entity](subject)
                 if rebuilt is not None:
-                    row["surface_mm_2a"] = round(surface_distance(rebuilt, real[entity]), 3)
+                    row["surface_mm_2a"] = score(rebuilt, entity)
             entry[entity] = row
         if raw_root is not None:
             from fields.data import labels_on_grid
@@ -364,9 +407,7 @@ def evaluate(
             perfect = label_meshes(truth.reshape(grid.shape), grid, classes)
             for entity in classes:
                 if entity in perfect and entity in real:
-                    entry[entity]["surface_mm_floor"] = round(
-                        surface_distance(perfect[entity], real[entity]), 3
-                    )
+                    entry[entity]["surface_mm_floor"] = score(perfect[entity], entity)
         entry["seconds"] = round(time.time() - started, 1)
         results[subject] = entry
         print(f"evaluated {subject} in {entry['seconds']} s", flush=True)
