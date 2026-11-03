@@ -50,7 +50,7 @@ from skimage import measure
 from torch.nn import functional
 
 from fields.data import EXTRA_CROPS
-from fields.model import Field, FieldConfig, make_field, pick_device
+from fields.model import Field, FieldConfig, OffsetField, make_field, pick_device
 from fields.train import weights_from_counts
 from shapes.register import load_scene
 
@@ -91,8 +91,10 @@ def load_checkpoint(path: Path, device: torch.device) -> tuple[Field, dict[str, 
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     config = dict(checkpoint["field_config"])
     config["part_of"] = tuple(config.get("part_of", ()))
-    field = make_field(FieldConfig(**config))
+    field: Field = make_field(FieldConfig(**config))
     field.load_state_dict(checkpoint["field"])
+    if "logit_offsets" in checkpoint:  # a calibrated checkpoint (fields.calibrate)
+        field = OffsetField(field, torch.as_tensor(checkpoint["logit_offsets"]))
     field.to(device).eval()
     for parameter in field.parameters():
         parameter.requires_grad_(False)

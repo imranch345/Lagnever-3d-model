@@ -36,6 +36,7 @@ __all__ = [
     "Field",
     "FieldConfig",
     "LabelField",
+    "OffsetField",
     "PartField",
     "make_field",
     "pick_device",
@@ -163,8 +164,28 @@ class PartField(nn.Module):
         return grouped.index_select(-1, order)
 
 
-#: Either kind of field; both take (points, codes) and carry their ``config``.
-Field = LabelField | PartField
+class OffsetField(nn.Module):
+    """A trained field with a fixed bias added to each class's logit (``fields.calibrate``).
+
+    Training weights rare classes more than "nothing". Where a thin structure borders mostly
+    "nothing" (the trachea), its boundary drifts outward. Offsets calibrated on training
+    subjects bring decoded volumes back to true ones; the network itself is unchanged.
+    """
+
+    def __init__(self, field: nn.Module, offsets: torch.Tensor) -> None:
+        super().__init__()
+        self.field = field
+        self.config = cast(FieldConfig, field.config)
+        self.register_buffer("offsets", offsets.detach().clone().float())
+
+    def forward(self, points_mm: torch.Tensor, codes: torch.Tensor) -> torch.Tensor:
+        """The wrapped field's logits plus the offsets."""
+        logits: torch.Tensor = self.field(points_mm, codes)
+        return logits + cast(torch.Tensor, self.offsets)
+
+
+#: Any field: each takes (points, codes) and carries its ``config``.
+Field = LabelField | PartField | OffsetField
 
 
 def make_field(config: FieldConfig = DEFAULT_FIELD) -> Field:

@@ -122,6 +122,8 @@ GENERATED_SOURCES = {"phantom"}
 #: Derived Level 1 and 2 folders. They hold binary meshes and models, each carrying its
 #: source's attribution.
 DERIVED_ASSET_DIRS = {"level1", "level2a"}
+#: Level 2b's labelled points and trained fields, one folder per dataset build.
+LEVEL2B_PREFIX = "level2b"
 
 
 def test_every_raw_asset_has_a_recorded_licence() -> None:
@@ -140,17 +142,22 @@ def test_processed_holds_text_or_attributed_derived_assets() -> None:
 
     This replaces the Step 6 rule, which allowed the synthetic corpus and nothing binary.
     Level 1 added meshes from CC BY 4.0 data, and Level 2a added shape models fitted to
-    them. Both live only in their own folders, carry the attribution, and stay out of git.
+    them. Level 2b adds labelled points and trained fields from the same data, one folder
+    per build (``level2b``, ``level2b-chest``…), whose manifest names the source and
+    licence. All live only in their own folders, carry the attribution, and stay out of git.
     """
     allowed = {".json", ".jsonl", ".gitkeep"}
     processed = datasets_dir() / "processed"
     for path in processed.rglob("*"):
         if path.is_dir():
             continue
-        if path.relative_to(processed).parts[0] in DERIVED_ASSET_DIRS:
+        top = path.relative_to(processed).parts[0]
+        if top in DERIVED_ASSET_DIRS or top.startswith(LEVEL2B_PREFIX):
             continue
         suffix = path.suffix or path.name
         assert suffix in allowed, f"unexpected file in datasets/processed: {path.name}"
+    for build in sorted(processed.glob(f"{LEVEL2B_PREFIX}*/manifest.json")):
+        assert json.loads(build.read_text("utf-8"))["source"]["license"], build
     provenance = processed / "level2a" / "provenance.json"
     if provenance.is_file():
         assert json.loads(provenance.read_text("utf-8"))["license"]

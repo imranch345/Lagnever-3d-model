@@ -695,3 +695,37 @@ class TestResize:
         points = torch.from_numpy(grid.points())
         b = [soft_volumes(model, c, points, 0.027)[2] for c in (start, free, kept)]
         assert b[2] >= b[1] - 1e-6, b
+
+
+class TestCalibration:
+    """fields.calibrate: per-class offsets that undo a volume bias, saved with the checkpoint."""
+
+    def test_offsets_bring_biased_counts_back_to_the_truth(self) -> None:
+        """A classifier that over-calls class 2 is corrected; 'nothing' keeps offset 0."""
+        from fields.calibrate import fit_offsets
+
+        rng = np.random.default_rng(0)
+        truth = rng.integers(0, 3, size=30_000)
+        logits = torch.from_numpy(np.eye(3)[truth] * 2.0 + rng.normal(0, 1.0, (30_000, 3)))
+        logits[:, 2] += 0.8  # inflate class 2
+        offsets, trace = fit_offsets(logits.float(), truth)
+        assert trace[0]["ratio"][2] > 1.1
+        assert all(abs(r - 1) < 0.02 for r in trace[-1]["ratio"])
+        assert offsets[0] == 0.0 and offsets[2] < -0.3
+
+    def test_a_calibrated_checkpoint_loads_with_its_offsets(self, tmp_path) -> None:
+        """load_checkpoint wraps the field; logits shift by exactly the offsets."""
+        from fields.evaluate import load_checkpoint
+        from fields.model import FieldConfig, LabelField, OffsetField
+
+        config = FieldConfig(n_classes=3, hidden=16, layers=2, latent_dim=4)
+        field = LabelField(config)
+        base = {"field_config": config.to_dict(), "field": field.state_dict()}
+        torch.save(base, tmp_path / "plain.pt")
+        torch.save({**base, "logit_offsets": torch.tensor([0.0, 0.5, -1.0])}, tmp_path / "cal.pt")
+        plain, _ = load_checkpoint(tmp_path / "plain.pt", torch.device("cpu"))
+        calibrated, _ = load_checkpoint(tmp_path / "cal.pt", torch.device("cpu"))
+        assert isinstance(calibrated, OffsetField) and calibrated.config == plain.config
+        points, code = torch.randn(1, 50, 3), torch.randn(1, 4)
+        shift = calibrated(points, code) - plain(points, code)
+        assert torch.allclose(shift, torch.tensor([0.0, 0.5, -1.0]).expand_as(shift), atol=1e-6)
