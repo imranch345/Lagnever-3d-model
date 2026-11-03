@@ -251,13 +251,15 @@ function showHeader() {
     : 'e.g. make the left ventricle transparent';
   const status = `${state.medical_status[0].toUpperCase()}${state.medical_status.slice(1)}.`;
   const g = state.generated;
+  // Level 2a samples carry their shape model's modes; Level 2b samples name their model.
+  const by = g && (g.modes ? `${g.modes} modes` : g.model);
   $('banner').textContent = g
-    ? `Generated thorax (seed ${g.seed}, ${g.modes} modes, ${g.training_subjects} training subjects). ${status}`
+    ? `Generated thorax (seed ${g.seed}, ${by}, ${g.training_subjects} training subjects). ${status}`
     : status;
   const c = state.credits;
   $('credits').innerHTML = '';
   $('credits').append(
-    g ? `Sampled from a shape model trained on ${c.dataset} v${c.version}, ${c.license}. `
+    g ? `Sampled from ${g.modes ? 'a shape model' : 'a neural label field'} trained on ${c.dataset} v${c.version}, ${c.license}. `
       : `Shapes derived from ${c.dataset} v${c.version} (subject ${c.subject}), ${c.license}. `,
     Object.assign(document.createElement('a'), { href: c.url, textContent: 'Source', target: '_blank', rel: 'noopener' }),
     ` · ${c.attribution}`,

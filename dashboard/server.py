@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 from dashboard.status import Roots, collect, doc_path, evidence_path
+from language.layer import load_user_env
 from viewer.server import STATIC as VIEWER_STATIC
 from viewer.server import ViewerApp, _handler, build_app
 
@@ -95,6 +96,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--port", type=int, default=8795)
     args = parser.parse_args(argv)
+    loaded = load_user_env()
+    if loaded:
+        print(f"Loaded from ~/.lagnav/anthropic.env: {', '.join(sorted(loaded))}", flush=True)
     research = args.research if args.research.is_dir() else PRODUCT
     roots = Roots(product=PRODUCT, research=research)
     server = make_dashboard_server(build_app(args.scene, args.model), roots, args.port)
