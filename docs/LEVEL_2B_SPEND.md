@@ -15,6 +15,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-18 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.01 (22:56:58–22:57:39 UTC) | ~0.01 | M2/stage 2 | stage 2 chest runs A and B, approved by the user (≤ $5): **preempted 41 s after creation**, before training began; the user then paused for the night | **~2.16** |
 | 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.23 + 0.28 (09:19–09:33, 09:35–09:52 UTC) | ~0.20 (estimate) | stage 2 | chest runs A and B; **preempted twice**, saved at step 2000 | **~2.36** |
 | 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | 3.34 (09:55–13:16 UTC) | ~2.85 (estimate, ~$0.85/h) | stage 2 | after two preemptions, per the user's rule: runs A and B finished; VM deleted | **~5.20** |
+| 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.62 (06:28–07:05 UTC) | ~0.20 (estimate) | stage 2 | runs C and D (data v3): 27 min of upload, then **preempted** about 10 min into training, before the first save | **~5.40** |
 
 ## Sessions
 
@@ -102,3 +103,7 @@ provider's own billing figures. A cap is a hard stop.
 - **Launch:** spot VM `lagnav-2b-m2` created at 06:28 UTC in us-east1-b (the first zone
   tried). Same image and safeguards as before: self-deletion at 6 hours, no service
   account, no scopes, dedicated SSH key.
+- **Preempted** at about 07:05 UTC, ten minutes after training began and before the first
+  save at step 2000, so nothing was kept. The approval read "spot; if it is reclaimed
+  midway, on-demand", so the session moved to on-demand at once. The watcher now polls
+  every 5 minutes instead of 10.
