@@ -18,8 +18,17 @@ Points are drawn from that volume:
   where one structure ends and the next begins;
 * **uniformly** in the region holding any structure, plus ``margin_mm``.
 
-Each point takes the label of its nearest voxel. Coordinates are mapped as Level 1 maps mesh
-vertices:
+Each point takes the label of its nearest voxel.
+
+**Labels beyond a crop** (``--beyond-crops``, chest data v3 onward). A crop says where a
+structure stops being *counted*, not where it stops. Without this option the cropped-away
+voxels are "nothing", so the field learns an IVC that ends exactly at the lungs' lowest slice,
+and the vessels' code must know where the lungs end. With it, the box is still set by the
+cropped volume, but within the box each point takes its uncropped label: the IVC, the aorta
+and the trachea run on through the margin as they do in the body. Evaluation and generation
+crop decoded volumes exactly as before (``fields.evaluate.apply_crops``).
+
+Coordinates are mapped as Level 1 maps mesh vertices:
 1. RAS+ millimetres by the volume's affine;
 2. minus the subject's heart-shell centroid (``origin_ras_mm`` in its manifest);
 3. ``RAS_TO_VIEWER``;
@@ -62,6 +71,7 @@ __all__ = [
     "build",
     "frame_for",
     "label_volume",
+    "label_volumes",
     "sample",
     "to_aligned",
 ]
@@ -122,17 +132,33 @@ def label_volume(
     counted, and keeps the later class, so nothing is hidden. Crops are applied as Level 1
     applies them (``assets.meshes``).
     """
+    labels, _, affine, overlaps = label_volumes(subject_dir, classes, label_map)
+    return labels, affine, overlaps
+
+
+def label_volumes(
+    subject_dir: Path,
+    classes: Sequence[str] = CLASSES,
+    label_map: LabelMap | None = None,
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8], FloatArray, int]:
+    """``label_volume``'s volume, the same volume without crops, its affine and overlaps.
+
+    Without crops, the aorta, the IVC and the trachea run on past the lungs' extent as they
+    do in the body (``build(beyond_crops=True)``).
+    """
     label_map = label_map or load_label_map(DEFAULT_LABEL_MAP)
     labels: npt.NDArray[np.uint8] | None = None
+    uncropped: npt.NDArray[np.uint8] | None = None
     affine: FloatArray | None = None
     overlaps = 0
     references: dict[str, npt.NDArray[np.bool_]] = {}
 
     def read(name: str) -> npt.NDArray[np.bool_]:
-        nonlocal labels, affine
+        nonlocal labels, uncropped, affine
         mask, this_affine = read_mask(subject_dir / "segmentations" / f"{name}.nii.gz")
         if labels is None:
             labels = np.zeros(mask.shape, dtype=np.uint8)
+            uncropped = np.zeros(mask.shape, dtype=np.uint8)
             affine = this_affine
         elif affine is None or mask.shape != labels.shape:
             raise ValueError(f"{name} is on a different grid from the other labels")
@@ -142,18 +168,20 @@ def label_volume(
 
     for index, entity in enumerate(classes, start=1):
         entry = label_map.for_entity(entity)
-        union = np.logical_or.reduce([read(name) for name in entry.labels])
+        whole = np.logical_or.reduce([read(name) for name in entry.labels])
+        union = whole
         crop = crop_of(entity, label_map)
         if crop is not None:
             if crop not in references:
                 names = label_map.crops[crop].reference_labels
                 references[crop] = np.logical_or.reduce([read(n) for n in names])
-            union = _crop_to_extent(union, references[crop])
-        assert labels is not None
+            union = _crop_to_extent(whole, references[crop])
+        assert labels is not None and uncropped is not None
         overlaps += int(np.count_nonzero(union & (labels > 0) & (labels != index)))
         labels[union] = index
-    assert labels is not None and affine is not None
-    return labels, affine, overlaps
+        uncropped[whole] = index
+    assert labels is not None and uncropped is not None and affine is not None
+    return labels, uncropped, affine, overlaps
 
 
 def labels_on_grid(
@@ -209,9 +237,13 @@ def sample(
     boundary_fraction: float = 0.6,
     jitter_mm: float = 1.5,
     margin_mm: float = 10.0,
+    extent: npt.NDArray[np.uint8] | None = None,
 ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8]]:
-    """Labelled points in the aligned frame: near boundaries, then uniform around the structures."""
-    occupied = np.argwhere(labels > 0)
+    """Labelled points in the aligned frame: near boundaries, then uniform around the structures.
+
+    The box is set by ``extent``'s structures (default ``labels``), the labels by ``labels``.
+    """
+    occupied = np.argwhere((labels if extent is None else extent) > 0)
     if occupied.size == 0:
         raise ValueError("no structure in this volume")
     spacing = float(np.mean(np.abs(np.diag(affine)[:3])))
@@ -251,8 +283,13 @@ def build(
     seed: int = 0,
     split_from: Path | None = Path("datasets/processed/level2a/report.json"),
     classes: Sequence[str] = CLASSES,
+    beyond_crops: bool = False,
 ) -> dict[str, Any]:
-    """Points for every subject, resumable; returns and writes ``manifest.json``."""
+    """Points for every subject, resumable; returns and writes ``manifest.json``.
+
+    With ``beyond_crops``, points take their uncropped labels inside the cropped box (see
+    the module notes). Volumes in the manifest are always the cropped ones.
+    """
     subjects = list(subjects) if subjects is not None else _usable(scenes_root)
     reference_heart = load_scene(scenes_root / REFERENCE)["heart"]
     points_dir = out_dir / "points"
@@ -265,10 +302,17 @@ def build(
             stored = np.load(target)
             stats[subject] = json.loads(str(stored["stats"]))
             continue
-        labels, affine, overlaps = label_volume(raw_root / subject, classes, label_map)
+        labels, uncropped, affine, overlaps = label_volumes(raw_root / subject, classes, label_map)
         frame = frame_for(scenes_root / subject, reference_heart, seed=seed)
         rng = np.random.default_rng([seed, position])
-        points, point_labels = sample(labels, affine, frame, n_points=n_points, rng=rng)
+        points, point_labels = sample(
+            uncropped if beyond_crops else labels,
+            affine,
+            frame,
+            n_points=n_points,
+            rng=rng,
+            extent=labels,
+        )
         voxel_ml = float(abs(np.linalg.det(affine[:3, :3]))) / 1000.0
         counts = np.bincount(labels.ravel(), minlength=len(classes) + 1)
         stats[subject] = {
@@ -292,7 +336,13 @@ def build(
         "dataset": "lagnav level 2b labelled points",
         "classes": ["nothing", *classes],
         "n_points": n_points,
-        "sampling": {"boundary_fraction": 0.6, "jitter_mm": 1.5, "margin_mm": 10.0, "seed": seed},
+        "sampling": {
+            "boundary_fraction": 0.6,
+            "jitter_mm": 1.5,
+            "margin_mm": 10.0,
+            "seed": seed,
+            "labels_beyond_crops": beyond_crops,
+        },
         "frame": "Level 1 viewer frame (heart-shell centroid origin), aligned rigidly onto "
         f"{REFERENCE} by the heart shell as in Level 2a",
         "reference": REFERENCE,
@@ -315,6 +365,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--points", type=int, default=200_000)
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--preset", choices=sorted(PRESETS), default="heart-lungs")
+    parser.add_argument(
+        "--beyond-crops", action="store_true", help="points take their uncropped labels"
+    )
     args = parser.parse_args(argv)
     manifest = build(
         args.raw,
@@ -323,6 +376,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         subjects=args.subjects,
         n_points=args.points,
         classes=PRESETS[args.preset],
+        beyond_crops=args.beyond_crops,
     )
     print(f"{len(manifest['subjects'])} subjects, classes {manifest['classes']}")
     return 0

@@ -128,6 +128,31 @@ class TestChest:
                 "the phantom's vessels run below the lungs, so the crop must remove something"
             )
 
+    def test_points_beyond_a_crop_keep_their_true_label(self, phantom) -> None:
+        """The box stays the cropped one; inside it, the IVC below the lungs is still the IVC."""
+        from fields import data
+        from shapes.register import load_scene
+
+        raw_root, scenes = phantom
+        labels, uncropped, affine, _ = data.label_volumes(raw_root / "p0", data.CHEST)
+        ivc = data.CHEST.index("heart.inferior_vena_cava") + 1
+        assert (uncropped == ivc).sum() > (labels == ivc).sum()
+        assert not ((labels > 0) & (uncropped != labels)).any(), "a crop only removes voxels"
+        frame = data.frame_for(scenes / "p0", load_scene(scenes / "p0")["heart"])
+
+        def draw(volume, extent=None):
+            rng = np.random.default_rng(0)
+            return data.sample(volume, affine, frame, n_points=20_000, rng=rng, extent=extent)
+
+        cropped_points, cropped_labels = draw(labels)
+        beyond_points, beyond_labels = draw(uncropped, extent=labels)
+        whole_points, _ = draw(uncropped)
+        height = lambda points: np.ptp(points[:, 1])  # noqa: E731  (y is superior)
+        jitter = 6.0  # boundary points near the box's edge are jittered by up to ~4 SD (1.5 mm)
+        assert height(beyond_points) <= height(cropped_points) + jitter
+        assert height(whole_points) > height(cropped_points) + 2 * jitter
+        assert (beyond_labels == ivc).sum() > (cropped_labels == ivc).sum()
+
     def test_decoded_vessels_are_cut_to_the_lungs_like_the_data(self) -> None:
         """An IVC continuing below the lungs is cut at their lowest slice; others untouched."""
         from fields.evaluate import apply_crops

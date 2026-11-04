@@ -1402,3 +1402,37 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Next lever for generation: the IVC breaking into pieces.** Calibration moved its volume
   near the truth; the pieces are a shape problem (a short tube with cut ends that the
   sampled codes can pinch). To be looked at per failing seed before any change.
+
+## 2026-11-04 (09:10) — Why the IVC breaks: the training labels say it stops where the lungs stop
+
+- **The field has learned the IVC well for real people.** Decoding 10 training subjects with
+  their own codes (calibrated run A): the IVC is one piece in all 10, at 18–49 mL against
+  true 20–50 mL. So the failures come from *sampled* codes, not from the network's capacity.
+- **Where sampled IVCs break** (the 7 failing seeds, `scratchpad` analysis, 2 mm grid):
+  - every stray piece lies at the IVC's lower end, between the heart and the lungs' lowest
+    slice, surrounded by "nothing" (the liver's region, not modelled);
+  - in passing samples the IVC runs exactly down to the lungs' lowest slice (seed 0: lungs
+    from y 36, IVC from y 36; seed 1: 15 and 15);
+  - in failing ones it stops short or thins out on the way: seed 13's ends 46 mm above the
+    lung base (4.7 mL in all); seed 3's is nearly gone (0.9 mL); seeds 22 and 44 pinch in two.
+- **Cause: the crop is in the training labels.** `label_volume` crops the IVC to the lungs'
+  extent and labels the cropped-away voxels "nothing", though the IVC is really there. The
+  network therefore learns an IVC that *ends* at the lungs' lowest slice, and the vessels'
+  code must encode where the lungs end. A sampled code whose vessel part and lung part
+  disagree slightly gives an IVC that fades before the lung base. The same holds for the
+  aorta below the lungs and the trachea above them.
+- **Fix, data v3 (`--beyond-crops`):** the sampling box is still set by the cropped volume,
+  but inside it each point takes its *uncropped* label, so the IVC, aorta and trachea run on
+  through the 10 mm margin as in the body. Nothing changes in evaluation or generation:
+  decoded volumes are cut by `apply_crops` exactly as before, and truth is cropped the same
+  way. The training labels simply stop claiming "nothing" where a vessel is.
+  - `fields.data.label_volumes` returns both volumes from one read; `sample(extent=...)`
+    takes the box from the cropped one. Tested on the phantom: the box is unchanged
+    (within the boundary jitter), and more IVC points appear.
+  - Without `--beyond-crops` the build is unchanged, so v1 and v2 stay reproducible.
+- **Needs a retrain** (GPU, about $2–3), so it waits for the user's approval. Proposed:
+  - **run C:** run A's settings on data v3, the clean test of the fix;
+  - **run D:** run C with the code prior at 3e-2 (from 1e-2). A tighter code
+    distribution may suit the Gaussian sampler better; it is untested above 1e-2.
+  - Measured as before: held-out fit (26 subjects), calibration, generation (50 seeds),
+    against run A.
