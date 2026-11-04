@@ -93,3 +93,12 @@ provider's own billing figures. A cap is a hard stop.
   remains.
 - **Stage 2 session:** about $3.05, under its $5 cap. **Project total: about $5.20** of
   the $700 budget.
+
+### 2026-11-04 · Stage 2 runs C and D (chest data v3)
+
+- **Approval:** the user chose "spot, fallback on-demand" for runs C and D, cap $5 for the
+  session (estimate $2–3). Purpose: test training labels beyond the crops (data v3), which
+  should stop sampled IVCs from breaking; run D adds a code prior of 3e-2.
+- **Launch:** spot VM `lagnav-2b-m2` created at 06:28 UTC in us-east1-b (the first zone
+  tried). Same image and safeguards as before: self-deletion at 6 hours, no service
+  account, no scopes, dedicated SSH key.

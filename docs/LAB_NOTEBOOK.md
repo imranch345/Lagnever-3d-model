@@ -1436,3 +1436,18 @@ data); code at `8fc2d04` + `f1bdcd4`.
     distribution may suit the Gaussian sampler better; it is untested above 1e-2.
   - Measured as before: held-out fit (26 subjects), calibration, generation (50 seeds),
     against run A.
+
+## 2026-11-04 (12:30) — Chest data v3 built; runs C and D training
+
+- **Data v3** (`--preset chest --points 300000 --beyond-crops`), 131 subjects, built in
+  80 minutes on the M2 (10:37–11:57, on AC power). Against v2, same seed:
+  - **only the cropped classes changed:** IVC points +8.3%, trachea +2.8%, aorta +1.7%;
+    every other class within 0.4%;
+  - volumes in the manifest, frames and the train / held-out split are identical to v2,
+    as they must be (volumes stay the cropped ones);
+  - the dataset policy tests pass (licence recorded, CC BY 4.0).
+- **GPU session** (user's approval: spot, fallback on-demand, cap $5): spot VM created at
+  06:28 UTC in us-east1-b. The upload took about 25 minutes; runs C (run A's settings on
+  v3) and D (C with code prior 3e-2) started at 06:55 UTC, sharing the L4 (12 GB).
+  A watcher pulls both runs every 10 minutes, so a preemption costs at most one save
+  interval (2,000 steps).
