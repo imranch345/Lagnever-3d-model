@@ -1636,3 +1636,11 @@ data); code at `8fc2d04` + `f1bdcd4`.
   checks, overall and structure by structure**. Under that target A passes overall, and
   the IVC remains the gap to close. The 90% figure is kept in the record as what was
   first stated.
+- **(22:55) The user chose the re-based target.** Stated here before any further result:
+  - **overall:** the samples' pass rate is at least real held-out people's under the same
+    checks (now 69%, 18 of 26);
+  - **per structure:** no structure fails in samples more than 5 points more often than in
+    real people (about 2 extra samples in 50).
+  - **Where A stands:** overall met (76%). Per structure, the IVC (14% against at most 9%)
+    and the aorta (6% against at most 5%) are not yet; every other structure is.
+  - ROADMAP, PLAN and RESULTS now state this target, keeping the first 90% on record.

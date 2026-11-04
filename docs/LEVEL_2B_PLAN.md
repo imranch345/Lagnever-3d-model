@@ -31,7 +31,7 @@ does in a body.
 | **M1** labelled points, model, training, evaluation | done | the pipeline is tested; the first prototype was 1.5–2× worse than Level 2a |
 | **M2** long GPU training | **done; fit target met** | run 6 (parts with compact codes) beats Level 2a on all seven structures: heart medians 0.57–1.10 mm against 0.82–1.43; lungs 2.56 and 2.86 against 3.58 and 4.05. About $2.15 spent |
 | **M3** generation, resize, viewer | in progress | generation 88% unfiltered at 1 SD under real-anatomy limits (target 90%; Level 2a 78%), novelty 94% of a real person's, 0 overlap; the viewer draws valid Level 2b thoraxes. Resize: lungs untouched by heart edits, but LV growth is +2% (target +15%): thin walls break first |
-| **M4** more structures, higher resolution | **in progress** (roadmap stage 2) | 14 chest structures trained (about $3); heart quality held. Logit calibration fixed the swollen trachea (held-out 1.49× → 1.07×). Generation 76% (target 90%), IVC fragments the main failure. LV resize +6% passes; +15% held its walls, refused by 1 mL |
+| **M4** more structures, higher resolution | **in progress** (roadmap stage 2) | 14 chest structures trained (about $7 with lost sessions); heart quality held. Logit calibration fixed the swollen trachea (held-out 1.49× → 1.07×). Generation 76% against 69% for real held-out people under the same checks (target re-based from 90% with the user's approval: at least as plausible as real people, overall and per structure). IVC fragments are the remaining gap (14% against 4%); uncropped vessel labels (run C) did not help. LV resize +6% passes; +15% held its walls, refused by 1 mL |
 
 ## 2. Approach: one field that labels every point
 
