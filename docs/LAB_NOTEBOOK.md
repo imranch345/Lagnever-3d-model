@@ -1505,7 +1505,7 @@ data); code at `8fc2d04` + `f1bdcd4`.
   and uploads only the code and resume states (a few MB). Staging began at 12:03 UTC.
   The run-C session follows by script: spot first, on-demand after one preemption,
   pulls every 5 minutes, and the VM is deleted when the run's final line appears.
-- **(12:25) Amendment to the judging rules, before any result of C.** Data v3's decoding
+- **(12:20) Amendment to the judging rules, before any result of C.** Data v3's decoding
   grid differs slightly from v2's (origin shifted by under 1 mm; 174 instead of 173 points
   along y), because `Grid.around` reads the training points. `fields.generate` refuses
   stray limits computed on another grid, so C's calibration and generation use
