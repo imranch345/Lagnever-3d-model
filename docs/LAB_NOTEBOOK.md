@@ -1505,3 +1505,14 @@ data); code at `8fc2d04` + `f1bdcd4`.
   and uploads only the code and resume states (a few MB). Staging began at 12:03 UTC.
   The run-C session follows by script: spot first, on-demand after one preemption,
   pulls every 5 minutes, and the VM is deleted when the run's final line appears.
+- **(12:25) Amendment to the judging rules, before any result of C.** Data v3's decoding
+  grid differs slightly from v2's (origin shifted by under 1 mm; 174 instead of 173 points
+  along y), because `Grid.around` reads the training points. `fields.generate` refuses
+  stray limits computed on another grid, so C's calibration and generation use
+  `--data level2b-chest-v2`: the same grid and the same real-anatomy limits as A, exactly
+  as stated. A model's codes do not depend on the data folder. Held-out fitting
+  (`fields.volumes`, `fields.evaluate`) uses each model's own data: v2 points for A, v3
+  points for C, since the code is fitted to points labelled as the model was trained.
+  Truth is the cropped CT in both cases.
+- **Staging done** at 12:17 UTC: snapshot `lagnav-level2b-chest-v3`, 453 MB, 131 subjects;
+  the upload took about 10 minutes this time. The stage VM and its disk were deleted.
