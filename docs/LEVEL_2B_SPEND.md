@@ -133,3 +133,11 @@ provider's own billing figures. A cap is a hard stop.
 - **Session: about $3.20 of its $5 cap, still with no training. Project total about $8.40.**
 - **The real bottleneck is the upload.** 430 MB from this connection takes 25–50 minutes
   and breaks often, and every GPU VM, including each spot replacement, needs it again.
+- **Staging** (user's choice, "keep the data in the cloud"): e2-small VM
+  `lagnav-data-stage`, us-central1-a, 12:03–12:17 UTC (about $0.01), uploaded data v3 in
+  about 10 minutes. Kept as the snapshot `lagnav-level2b-chest-v3` (453 MB, about $0.03 a
+  month, label `purpose=lagnav-level2b`); the VM and its disk were deleted.
+- **Run C, spot, from the snapshot:** VM created at 12:21:56 UTC in us-west1-c (the first
+  eight zones had no spot capacity). The data disk was attached at creation; training
+  began at 12:22:43, **47 seconds after the VM was created**, against 25–50 minutes of
+  upload before.
