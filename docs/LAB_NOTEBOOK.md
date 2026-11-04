@@ -1349,3 +1349,56 @@ data); code at `8fc2d04` + `f1bdcd4`.
   generation and resize use it unchanged. The alternative, retraining with weaker class
   weights, costs a GPU run.
 - **Paused** for the night. No VM exists; nothing is running.
+
+## 2026-11-04 (07:55) — Logit calibration fixes the trachea; chest generation 64% → 76%
+
+- **Calibration** (`fields.calibrate`) on run A, chest data v2. Offsets were fitted on 20
+  *training* subjects (200,000 grid points each, inside each subject's lung slab), then
+  tested on held-out subjects that played no part.
+  - **On the training points, predicted ÷ true counts before → after:** trachea 1.55 → 1.00,
+    IVC 1.33 → 1.00, aorta 1.11 → 1.00, pulmonary trunk 1.13 → 1.00, chambers and lobes
+    1.02–1.08 → 1.00.
+  - Offsets (logit, "nothing" fixed at 0): −0.9 to −1.3 for the lobes, −1.4 to −2.0 for the
+    heart, −2.4 for the IVC and the trachea. Every structure shifts toward "nothing"; the
+    thin tubes shift most.
+- **Held-out check, 6 subjects** (`fields.volumes`, decoded ÷ true volume, median):
+
+  | structure | plain | calibrated |
+  | --- | --- | --- |
+  | chambers, myocardium | 1.00–1.02 | 1.00–1.01 |
+  | aorta | 1.00 | 0.99 |
+  | pulmonary trunk | 1.06 | 1.03 |
+  | **IVC** | **1.12** | **0.97** |
+  | lobes | 1.01–1.03 | 1.01–1.02 |
+  | **trachea** | **1.49** | **1.07** |
+
+  - **The trachea's swelling is mostly gone** on people the calibration never saw, and
+    nothing else got worse. This confirms the diagnosis: the weighted boundary of a thin
+    tube drifts into "nothing"; a per-class offset undoes it.
+- **Generation with the calibrated checkpoint,** 50 samples at 1 SD, real-anatomy limits,
+  same seeds as the 64% run:
+  - **76% valid** (38 of 50), up from 64% (32 of 50). No point claimed twice. Novelty
+    5.46 mm (valid draws 5.32) against 6.21 mm for a new real person (v2 baseline): 86–88%.
+  - **Sampled trachea median 33.5 mL** (was 49.9; training median 34.2). Trachea failures
+    fell from 12 to 5 samples. Three of the five are now too *small* (6–14 mL against a
+    18 mL minimum), and two break into pieces.
+  - **The IVC is now the main failure:** 8 of 50 samples (5 in pieces, 3 out of the volume
+    range). Sampled IVC median 29.7 mL against a training median of 34.3.
+  - The rest are spread: aorta 4 (2 in pieces, 2 too small), lobes 6 failures across 3
+    samples (one draw has every lobe too large: an extreme code, not a lobe problem),
+    myocardium 1, RA 1.
+  - Every sample that failed after calibration also failed before, except seeds 32 and 35.
+    Calibration cures failures; it adds few new ones.
+- **No GPU hang** (no "command buffer" errors); the jobs ran one after another on the M2.
+- **Code.**
+  - `fields.volumes`: the held-out volume check, now a module with a test (it began as a
+    scratch script).
+  - `Grid.around`: the decoding grid was built by the same five lines in three modules.
+- **Not yet done, needs AC power (each ~1 h on the M2):**
+  - re-run the held-out surface evaluation with the calibrated checkpoint on data v2. The
+    table of 2026-10-19 used data v1: IVC and trachea scored without their crops;
+  - calibrate run B and generate with it;
+  - the multi-subject resize test.
+- **Next lever for generation: the IVC breaking into pieces.** Calibration moved its volume
+  near the truth; the pieces are a shape problem (a short tube with cut ends that the
+  sampled codes can pinch). To be looked at per failing seed before any change.

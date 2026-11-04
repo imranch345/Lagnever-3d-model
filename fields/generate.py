@@ -337,14 +337,7 @@ def generate(
     ontology = load_ontology(Path("ontology/thorax"), expected_version="0.1.0")
     codes = checkpoint["codes"].numpy().astype(np.float64)
     gaussian = CodeGaussian.fit(codes, variance)
-    training = np.concatenate(
-        [np.load(data_dir / "points" / f"{s}.npz")["points"][::20] for s in train[:20]]
-    )
-    grid = Grid(
-        np.percentile(training, 0.5, axis=0) - 10,
-        np.percentile(training, 99.5, axis=0) + 10,
-        spacing_mm,
-    )
+    grid = Grid.around(data_dir, train, spacing_mm)
 
     def as_code(vector: npt.ArrayLike) -> torch.Tensor:
         return torch.as_tensor(np.asarray(vector), dtype=torch.float32).unsqueeze(0)

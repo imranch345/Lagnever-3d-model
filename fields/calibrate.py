@@ -123,14 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     classes = list(checkpoint["classes"][1:])
     manifest = json.loads((args.data / "manifest.json").read_text(encoding="utf-8"))
     train = list(checkpoint["subjects"])
-    training = np.concatenate(
-        [np.load(args.data / "points" / f"{s}.npz")["points"][::20] for s in train[:20]]
-    )
-    grid = Grid(
-        np.percentile(training, 0.5, axis=0) - 10,
-        np.percentile(training, 99.5, axis=0) + 10,
-        args.spacing,
-    )
+    grid = Grid.around(args.data, train, args.spacing)
     used = train[: args.subjects]
     logits, truth = collect(
         field,

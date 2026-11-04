@@ -729,3 +729,44 @@ class TestCalibration:
         points, code = torch.randn(1, 50, 3), torch.randn(1, 4)
         shift = calibrated(points, code) - plain(points, code)
         assert torch.allclose(shift, torch.tensor([0.0, 0.5, -1.0]).expand_as(shift), atol=1e-6)
+
+
+class TestVolumes:
+    """fields.volumes: decoded ÷ true volume per structure."""
+
+    def test_a_structure_twice_too_large_reads_two(self, tmp_path, monkeypatch) -> None:
+        """A decoded ball of twice the true volume gives 2; a class absent from the truth NaN."""
+        from types import SimpleNamespace
+
+        import fields.volumes as volumes
+        from fields.evaluate import Grid
+
+        class Ball(torch.nn.Module):
+            config = SimpleNamespace(n_classes=3)
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.unused = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, points: torch.Tensor, code: torch.Tensor) -> torch.Tensor:
+                logits = torch.full((*points.shape[:-1], 3), -5.0)
+                logits[..., 0] = 0.0
+                logits[..., 1] = torch.where(points.norm(dim=-1) < 20.0, 5.0, -5.0)
+                return logits
+
+        (tmp_path / "points").mkdir()
+        np.savez(tmp_path / "points" / "s.npz", points=np.zeros((1, 3)), labels=np.zeros(1))
+        monkeypatch.setattr(volumes, "fit_code", lambda *args, **kwargs: torch.zeros(1, 4))
+        monkeypatch.setattr(
+            volumes,
+            "labels_on_grid",
+            lambda root, frame, points, classes: (
+                np.linalg.norm(points, axis=1) < 20.0 / 2 ** (1 / 3)
+            ).astype(np.uint8),
+        )
+        grid = Grid([-30, -30, -30], [30, 30, 30], 1.0)
+        ratios = volumes.volume_ratios(
+            Ball(), ["a", "b"], grid, ["s"], tmp_path, tmp_path, {"s": {"frame": None}}
+        )
+        assert ratios.shape == (1, 2)
+        assert abs(ratios[0, 0] - 2.0) < 0.1 and np.isnan(ratios[0, 1])

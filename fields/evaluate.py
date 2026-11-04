@@ -79,6 +79,22 @@ class Grid:
         extent = np.asarray(high, dtype=np.float64) - self.low
         self.shape = tuple(int(n) for n in np.ceil(extent / self.spacing).astype(int) + 1)
 
+    @classmethod
+    def around(cls, data_dir: Path, subjects: Sequence[str], spacing_mm: float) -> Grid:
+        """The grid every Level 2b decode uses: the first 20 subjects' points, 10 mm margin.
+
+        Bounds are their 0.5th and 99.5th percentiles, so a few far-out points do not
+        stretch it.
+        """
+        training = np.concatenate(
+            [np.load(data_dir / "points" / f"{s}.npz")["points"][::20] for s in subjects[:20]]
+        )
+        return cls(
+            np.percentile(training, 0.5, axis=0) - 10,
+            np.percentile(training, 99.5, axis=0) + 10,
+            spacing_mm,
+        )
+
     def points(self) -> npt.NDArray[np.float32]:
         """Every grid point, (X·Y·Z, 3), x slowest."""
         axes = [self.low[i] + self.spacing * np.arange(self.shape[i]) for i in range(3)]
@@ -332,17 +348,7 @@ def evaluate(
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     if subjects is None:
         subjects = list((manifest.get("split") or {}).get("held_out", []))
-    training = np.concatenate(
-        [
-            np.load(data_dir / "points" / f"{s}.npz")["points"][::20]
-            for s in checkpoint["subjects"][:20]
-        ]
-    )
-    grid = Grid(
-        np.percentile(training, 0.5, axis=0) - 10,
-        np.percentile(training, 99.5, axis=0) + 10,
-        spacing_mm,
-    )
+    grid = Grid.around(data_dir, checkpoint["subjects"], spacing_mm)
     models_2a = _level2a(level2a_dir) if level2a_dir is not None else None
     weights = None
     if fit_weighted:
