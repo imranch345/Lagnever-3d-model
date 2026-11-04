@@ -13,7 +13,7 @@ This roadmap is written for the team and for investors. Its estimates are honest
 - **Every stage ends in measured results,** recorded in [`RESULTS.md`](RESULTS.md) and
   [`LAB_NOTEBOOK.md`](LAB_NOTEBOOK.md), whether they meet the target or not.
 
-## Where we are (2026-10-19)
+## Where we are (2026-11-04)
 
 | capability | state |
 | --- | --- |
@@ -21,7 +21,8 @@ This roadmap is written for the team and for investors. Its estimates are honest
 | Language control | Rules first, then Claude, restricted to a closed set of validated operations. Hinglish works ("dil ka LV 10% chhota karo"), and so do descriptions and refusals for absent anatomy |
 | Generated anatomy, statistical (Level 2a) | Shape models of 7 structures; 78% of draws plausible unfiltered |
 | **Generated anatomy, neural (Level 2b)** | **One network for the heart and lungs. On 26 unseen people it fits better than Level 2a on all 7 structures** (heart 25–30% closer). **88% of draws are plausible unfiltered**, and no point ever belongs to two structures. Trained for about $2 of GPU time |
-| Known gap | Growing one chamber far (+15%) breaks thin walls first; the limit today is +2% |
+| **Complete chest (stage 2), in progress** | 14 structures in one network: chambers, myocardium, aorta, pulmonary trunk, IVC, five lung lobes, trachea. The heart held its quality. **76% of draws plausible** (target 90%). The LV grows +6% with walls intact (+2% before) |
+| Known gaps | The IVC sometimes breaks into pieces in generated samples. Growing one chamber +15% keeps its walls, but s0029's lobe already sits at the training maximum, so the check refuses it |
 
 ## The data already supports the goal
 
@@ -43,12 +44,12 @@ layer already maps names to parts.
 | stage | what a user gets | structures | effort | GPU cost | status |
 | --- | --- | --- | --- | --- | --- |
 | **1. Heart and lungs** | generated heart and lungs, better than the statistical model; language control | 7 | done | ~$2 | **done** (M1–M2; most of M3) |
-| **2. Complete chest** | great vessels (aorta, pulmonary artery, IVC), trachea, the five lung lobes; chamber resizing that holds up | ~14 | 1–2 weeks | ~$10–30 | **next** |
+| **2. Complete chest** | great vessels (aorta, pulmonary artery, IVC), trachea, the five lung lobes; chamber resizing that holds up | ~14 | 1–2 weeks | ~$10–30 | **in progress** (~$3 so far) |
 | **3. Torso** | abdominal organs, ribs, spine, abdominal vessels | ~60 | 3–5 weeks | ~$50–150 | planned |
 | **4. Whole body, organ level** ⭐ | **name any of the 104 structures and get it generated**, in place, resizable, explained | 104 | ~2–3 months from now | within the $700 budget | **target** |
 | **5. Fine anatomy** | hands, eyes, ears, nerves, regions inside the brain | hundreds | 6+ months | new budget | needs new data |
 
-### Stage 2: complete chest (next)
+### Stage 2: complete chest (in progress)
 
 - **Data.** Already on disk: 200 subjects with all 14 chest labels. No download is needed.
 - **Model.** The same part-field architecture with more parts: heart, great vessels, lungs
@@ -57,6 +58,11 @@ layer already maps names to parts.
   - every new structure fits unseen people as well as Level 1's own meshes allow;
   - generation stays at 90% or more plausible, unfiltered;
   - one chamber grows by +15% with its walls intact.
+- **Measured so far (2026-11-04):**
+  - fit: met for the heart and lobes; the IVC and trachea are being re-scored with their
+    crops;
+  - generation: 76%, up from 44%, after decoding crops and a volume calibration;
+  - resize: +6% passes; +15% keeps its walls but is refused by 1 mL on the test subject.
 
 ### Stage 3: torso
 
