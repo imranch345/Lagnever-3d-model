@@ -1494,3 +1494,14 @@ data); code at `8fc2d04` + `f1bdcd4`.
   disk snapshot in the project (about $0.03 a month), and create each GPU VM with a data
   disk made from it, so training starts within minutes. Stage 3's larger data needs this
   anyway. It adds a persistent resource to the user's project, so it is the user's call.
+- **(12:05) The user chose to keep the data in the cloud.** `tools/gpu_session.sh stage`:
+  - creates an e2-small CPU VM (about $0.02 an hour) with a 10 GB data disk;
+  - uploads data v3 once (resumable), checks that 131 subjects arrived, and keeps the
+    disk as the snapshot `lagnav-level2b-chest-v3` (about $0.03 a month, labelled
+    `purpose=lagnav-level2b`, deletable at any time);
+  - deletes the VM and the disk.
+
+  `launch` then gives each GPU VM a data disk made from the snapshot (mounted read-only)
+  and uploads only the code and resume states (a few MB). Staging began at 12:03 UTC.
+  The run-C session follows by script: spot first, on-demand after one preemption,
+  pulls every 5 minutes, and the VM is deleted when the run's final line appears.
