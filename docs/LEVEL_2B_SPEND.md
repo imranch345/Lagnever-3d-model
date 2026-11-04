@@ -18,6 +18,8 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.62 (06:28–07:05 UTC) | ~0.20 (estimate) | stage 2 | runs C and D (data v3): 27 min of upload, then **preempted** about 10 min into training, before the first save | **~5.40** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 2.69 (07:08–09:49 UTC) | ~2.30 (estimate, ~$0.85/h) | stage 2 | **wasted:** the data upload broke at 07:27 and the launcher did not notice; the VM sat idle until found and deleted. No training ran | **~7.70** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 0.82 (10:34–11:23 UTC) | ~0.70 (estimate) | stage 2 | run C alone (user's choice): the upload was still running after 45 min, the new idle watchdog shut the VM down mid-upload, and launch deleted it. No training ran | **~8.40** |
+| 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | none (e2-small CPU VM) | 0.23 (12:03–12:17 UTC) | ~0.01, plus ~$0.03 a month for the snapshot | stage 2 | staging: data v3 uploaded once and kept as the snapshot `lagnav-level2b-chest-v3` | **~8.41** |
+| 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-west1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.68 (12:21:56–14:02 UTC) | ~0.60 (estimate, ~$0.35/h) | stage 2 | **run C trained:** data from the snapshot, training 12:22:43–13:59:25 (40,000 steps, 96.7 min), no preemption; VM deleted by the watcher | **~9.00** |
 
 ## Sessions
 
@@ -141,3 +143,7 @@ provider's own billing figures. A cap is a hard stop.
   eight zones had no spot capacity). The data disk was attached at creation; training
   began at 12:22:43, **47 seconds after the VM was created**, against 25–50 minutes of
   upload before.
+- **Run C finished** at step 40,000 (13:59:25 UTC, 96.7 minutes of training, no
+  preemption). The watcher pulled the checkpoint and deleted the VM at 14:02; no VM or
+  disk was left in the project.
+- **Session: about $3.80 of its $5 cap. Project total about $9.00 of $700.**
