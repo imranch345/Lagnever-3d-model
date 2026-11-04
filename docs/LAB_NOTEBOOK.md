@@ -1569,7 +1569,15 @@ data); code at `8fc2d04` + `f1bdcd4`.
 
   With the crops applied to both sides, the IVC (3.86 → 2.94) and the trachea
   (3.30 → 2.59) read better than in the 2026-10-19 table, which scored them uncropped.
-  C's held-out evaluation is running for the fit record.
+- **C's held-out fit against A** (same rule, C fitted to its own v3 points), medians:
+  - heart within 0.04 mm of A (LA −0.02, LV +0.04, RA +0.02, RV +0.03, myocardium 0.00):
+    inside the guard;
+  - **IVC 3.19 against 2.94 (+0.25 mm), outside the 0.1 mm guard**; trachea 2.49 against
+    2.59 (−0.10);
+  - aorta 1.94 against 1.53 (+0.40), pulmonary trunk +0.10; lobes within 0.03 except the
+    left lower lobe (2.23 against 2.50).
+
+  So C also fails the fit guard on the IVC. Both verdicts agree: A stays.
 - **Next question: is it the sampler or the decoder?** Training subjects' own codes decode
   to one-piece IVCs (10 of 10, 09:10 entry); 1 SD Gaussian draws break it in 7 of 50.
   Stated before running, on calibrated A, judged by the same limits, without novelty:
@@ -1585,4 +1593,46 @@ data); code at `8fc2d04` + `f1bdcd4`.
     training, so codes between subjects decode to whole anatomy, and needs a GPU run.
 - **Paused on battery** at 21:59: the charger came off, so C's evaluation (21 of 26
   subjects done) and A's control were suspended (SIGSTOP), not killed. They resume by
-  themselves on AC power.
+  themselves on AC power. AC returned at 22:07 and both resumed.
+
+## 2026-11-04 (22:40) — Real people pass the chest checks only 69% of the time
+
+- **Control 1: A's own training codes** (50 subjects, decoded and judged as samples are):
+  **84% pass.** 7 of the 8 failures are volumes a hair outside the training range
+  (pulmonary trunk 119 mL against a maximum of 119; middle lobe 833 against 830; trachea
+  18 against 18). These subjects *are* the training minimum or maximum, and the decode
+  reproduces them to within about 1%. Only one failure is structural (an IVC with 8.1% in
+  a stray piece).
+- **Control 2: real held-out people** (`scratchpad/real_control.py`): the 26 held-out
+  subjects' CT labels on the same grid, measured and judged exactly as a sample is (same
+  volume limits, real-anatomy stray limits, closed meshes, sides). **18 of 26 pass (69%).**
+  - 6 of the 8 failures are lobe volumes outside the training range (for example s0657's
+    left upper lobe 2928 mL against a maximum of 1948; s0618's right upper lobe 361 mL
+    against a minimum of 499). Lobes vary more between people than 105 subjects span,
+    because the fissures sit in different places.
+  - the others: s0621's pulmonary trunk 124 mL (maximum 119); s0421's IVC with 2.6% in a
+    stray piece.
+- **So the 90% target does not carry over from 7 structures to 14.** It came from Level
+  2a, where real held-out people passed 90.5% of the checks for 7 structures. With 14
+  structures and volume limits set by 105 people's minimum and maximum, the same kind of
+  checks pass only 69% of real people. **A's generated samples pass 76%: already within
+  noise of real people (SE about 6 points for 50 samples, about 9 for 26 people).**
+- **Per structure, where samples fail more often than real people** (A, 50 samples,
+  against 26 real people):
+
+  | structure | samples failing | real people failing |
+  | --- | --- | --- |
+  | IVC | **7 (14%)**, mostly in pieces | 1 (4%), 2.6% stray |
+  | aorta | 3 (6%) | 0 |
+  | trachea | 3 (6%) | 1 (4%) |
+  | myocardium, RA | 1 each (2%) | 0 |
+  | any lobe | 4 (8%) | **6 (23%)** |
+  | pulmonary trunk | 0 | 1 (4%) |
+
+  The generator's real weakness is the IVC (and less so the aorta): thin vessels that
+  break into pieces. Lobe volumes fail *less* often in samples than in real people.
+- **Proposed, for the user to decide:** state stage 2's generation target the way Level
+  2a's was measured: **at least as plausible as real held-out people under the same
+  checks, overall and structure by structure**. Under that target A passes overall, and
+  the IVC remains the gap to close. The 90% figure is kept in the record as what was
+  first stated.
