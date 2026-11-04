@@ -1451,3 +1451,19 @@ data); code at `8fc2d04` + `f1bdcd4`.
   v3) and D (C with code prior 3e-2) started at 06:55 UTC, sharing the L4 (12 GB).
   A watcher pulls both runs every 10 minutes, so a preemption costs at most one save
   interval (2,000 steps).
+- **Stated before any result of C or D: how they will be judged.**
+  - **Same pipeline for A, C and D:**
+    - calibration on the first 20 training subjects;
+    - generation with the calibrated checkpoint: 50 seeds (0–49), 1 SD, real-anatomy
+      limits of data v2;
+    - held-out evaluation on the 26 held-out subjects, with crops, the floor and
+      `--no-smooth`. A is re-evaluated this way too, so all three are scored by one rule.
+  - **Primary question:** does C's generation pass rate beat A's 76% (38 of 50), and do its
+    IVC failures fall below A's 8 of 50?
+  - **Guard on fit:** C is adopted only if its held-out heart medians (LA, LV, RA, RV,
+    myocardium) stay within 0.05 mm of A's, and its IVC and trachea medians are no worse
+    than A's by more than 0.1 mm.
+  - **D against C:** D is preferred only if it generates better than C under the same fit
+    guard. If its fit is worse, that is the price of the prior, and it is reported.
+  - **Noise.** With 50 samples, a pass rate has a standard error of about 6 points. A
+    difference under 10 points is therefore reported as "no clear change", not as a win.
