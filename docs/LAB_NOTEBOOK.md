@@ -1467,3 +1467,20 @@ data); code at `8fc2d04` + `f1bdcd4`.
     guard. If its fit is worse, that is the price of the prior, and it is reported.
   - **Noise.** With 50 samples, a pass rate has a standard error of about 6 points. A
     difference under 10 points is therefore reported as "no clear change", not as a win.
+
+## 2026-11-04 (15:20) — GPU session lost; launcher made safe against idle VMs
+
+- **Spot VM preempted** at about 07:05 UTC, ten minutes into training and before the first
+  save (step 2000). Nothing was kept.
+- **On-demand fallback failed silently.** The VM was created at 07:08 UTC, but the 430 MB
+  data upload broke at 07:27 ("connection reset by peer"). The launcher's output went
+  through `tail`, which hid the error status. The Mac then slept on battery, so the
+  failure was found only at 09:47. The idle VM was deleted at 09:49.
+- **Cost of the mistake: about $2.30 for nothing.** Session spend is about $2.50 of its $5
+  cap; project total about $7.70. Logged in `LEVEL_2B_SPEND.md`.
+- **Fixes in `tools/gpu_session.sh`:** resumable uploads with retries; a failed deploy
+  deletes the VM; a watchdog on the VM shuts it down after 45 idle minutes; `start` brings
+  back a stopped VM with its new IP.
+- **Runs C and D have not trained yet.** About $2.50 of the session cap remains: enough for
+  run C alone on-demand (about 2 h plus upload, roughly $2), not for both. That choice,
+  and a session on AC power with the Mac awake, are for the user.

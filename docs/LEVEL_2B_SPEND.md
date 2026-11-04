@@ -16,6 +16,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 spot | 0.23 + 0.28 (09:19–09:33, 09:35–09:52 UTC) | ~0.20 (estimate) | stage 2 | chest runs A and B; **preempted twice**, saved at step 2000 | **~2.36** |
 | 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | 3.34 (09:55–13:16 UTC) | ~2.85 (estimate, ~$0.85/h) | stage 2 | after two preemptions, per the user's rule: runs A and B finished; VM deleted | **~5.20** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.62 (06:28–07:05 UTC) | ~0.20 (estimate) | stage 2 | runs C and D (data v3): 27 min of upload, then **preempted** about 10 min into training, before the first save | **~5.40** |
+| 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 2.69 (07:08–09:49 UTC) | ~2.30 (estimate, ~$0.85/h) | stage 2 | **wasted:** the data upload broke at 07:27 and the launcher did not notice; the VM sat idle until found and deleted. No training ran | **~7.70** |
 
 ## Sessions
 
@@ -107,3 +108,18 @@ provider's own billing figures. A cap is a hard stop.
   save at step 2000, so nothing was kept. The approval read "spot; if it is reclaimed
   midway, on-demand", so the session moved to on-demand at once. The watcher now polls
   every 5 minutes instead of 10.
+- **On-demand VM, wasted.** Created at 07:08 UTC in us-central1-a (us-east1-b/c/d had no
+  on-demand capacity). The data upload (scp) broke at 07:27 with "connection reset by
+  peer", a third of the way through. The launcher piped its output through `tail`, so the
+  failure did not stop it with an error, and the Mac then slept on battery, so no one saw
+  it. The VM sat idle, billing about $0.85 an hour, until 09:47, when the failure was
+  found; it was deleted at 09:49. No lagnav instance or disk remains.
+- **Session so far: about $2.50 of its $5 cap, with no training to show for it. Project
+  total: about $7.70** of $700.
+- **Launcher fixes, so an idle VM cannot happen again** (`tools/gpu_session.sh`):
+  - uploads use `rsync --partial` with five tries, so a dropped connection resumes;
+  - `launch` deletes the VM if deploying fails (deploy runs as its own process, so the
+    first failing command stops it);
+  - on the VM, a watchdog startup script shuts it down after 45 minutes without a
+    training process (upload time included). A stopped VM bills only its disk; `start`
+    restarts it and records its new IP.

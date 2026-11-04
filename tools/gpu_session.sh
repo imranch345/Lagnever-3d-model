@@ -6,6 +6,7 @@
 #   tools/gpu_session.sh pull                       copy every run's files back to the Mac
 #   tools/gpu_session.sh status                     VM state and the last line of each run log
 #   tools/gpu_session.sh delete                     delete the VM
+#   tools/gpu_session.sh start                      restart a VM the watchdog stopped (new IP)
 #
 # RUNS_FILE has one run per line, "name|fields.train arguments" (tools/gpu_runs/*.txt).
 # DATA_DIR is a fields.data output folder (manifest.json and points/).
@@ -14,6 +15,9 @@
 # Safeguards: the VM deletes itself after 6 hours; it has no service account and no API
 # scopes; SSH uses a dedicated key in instance metadata with project keys blocked. A run
 # resumes from the newest state.pt on the Mac, so losing the VM costs one save interval.
+# If deploying fails, launch deletes the VM. On the VM, a watchdog (startup script) shuts it
+# down after 45 minutes with no training process, so an idle VM bills only its disk.
+# Uploads use rsync --partial with retries, so a dropped connection resumes the transfer.
 set -euo pipefail
 
 PROJECT=lagnever-ai-app-n
@@ -33,10 +37,39 @@ vm() {  # run a command on the VM; -n so it never reads this script's stdin
     -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 "lagnav@${IP}" "$@"
 }
 
+upload() {  # upload DEST FILE...: DEST relative to the VM's home; resumes a dropped transfer
+  local dest="$1"
+  shift
+  # shellcheck disable=SC1090
+  source "$STATE"
+  for attempt in 1 2 3 4 5; do
+    if rsync -a --partial --timeout=120 \
+        -e "ssh -i $KEY -o UserKnownHostsFile=$KNOWN -o BatchMode=yes -o ConnectTimeout=15" \
+        "$@" "lagnav@${IP}:$dest"; then
+      return 0
+    fi
+    echo "upload attempt $attempt failed; retrying"
+    sleep 20
+  done
+  return 1
+}
+
 create() {
-  local provisioning="${PROVISIONING:-SPOT}" keys
+  local provisioning="${PROVISIONING:-SPOT}" keys watchdog
   keys="$(mktemp)"
   printf 'lagnav:%s\n' "$(cat "$KEY.pub")" > "$keys"
+  watchdog="$(mktemp)"
+  cat > "$watchdog" <<'EOF'
+#!/bin/bash
+# Shut down after 45 minutes without a training process (upload included): a stopped VM
+# bills only its disk.
+idle=0
+while true; do
+  sleep 60
+  if pgrep -f fields.train > /dev/null; then idle=0; else idle=$((idle + 1)); fi
+  if [ "$idle" -ge 45 ]; then shutdown -h now; fi
+done
+EOF
   for zone in $ZONES; do
     if gcloud compute instances create "$NAME" --project "$PROJECT" --zone "$zone" \
         --machine-type g2-standard-8 --provisioning-model "$provisioning" \
@@ -46,7 +79,7 @@ create() {
         --image-project deeplearning-platform-release \
         --boot-disk-size 100GB --boot-disk-type pd-balanced \
         --no-service-account --no-scopes \
-        --metadata-from-file "ssh-keys=$keys" \
+        --metadata-from-file "ssh-keys=$keys,startup-script=$watchdog" \
         --metadata block-project-ssh-keys=TRUE,install-nvidia-driver=True \
         --labels purpose=lagnav-level2b,milestone=m2 > /dev/null 2>&1; then
       local ip
@@ -55,20 +88,25 @@ create() {
       printf 'ZONE=%s\nIP=%s\n' "$zone" "$ip" > "$STATE"
       # A new VM can reuse a released IP with a new host key; forget the old one.
       ssh-keygen -R "$ip" -f "$KNOWN" > /dev/null 2>&1 || true
-      rm -f "$keys"
+      rm -f "$keys" "$watchdog"
       echo "created $provisioning in $zone at $(date -u +%H:%M:%S) UTC"
       return 0
     fi
     echo "no $provisioning capacity in $zone"
   done
-  rm -f "$keys"
+  rm -f "$keys" "$watchdog"
   echo "no zone had $provisioning capacity" >&2
   return 1
 }
 
 launch() {
   create
-  deploy "$1" "$2"
+  # A separate process, so that set -e still stops it at the first failure.
+  if ! "$0" deploy "$1" "$2"; then
+    echo "deploy failed; deleting the VM so it does not sit idle" >&2
+    delete_vm
+    return 1
+  fi
 }
 
 deploy() {
@@ -91,12 +129,8 @@ deploy() {
     if [ -f "$RUNS/$run.log" ]; then cp "$RUNS/$run.log" "$stage/runs/"; fi
   done < "$runs_file"
   COPYFILE_DISABLE=1 tar --no-xattrs -cf "$stage/resume.tar" -C "$stage" runs
-  # shellcheck disable=SC1090
-  source "$STATE"
-  scp -q -i "$KEY" -o UserKnownHostsFile="$KNOWN" -o BatchMode=yes \
-    "$stage/code.tgz" "$stage/resume.tar" "lagnav@${IP}:~/"
-  scp -q -i "$KEY" -o UserKnownHostsFile="$KNOWN" -o BatchMode=yes \
-    "$CACHE/$data_name.tar" "lagnav@${IP}:~/data.tar"
+  upload "" "$stage/code.tgz" "$stage/resume.tar"
+  upload data.tar "$CACHE/$data_name.tar"
   vm 'mkdir -p lagnav/data && cd lagnav && tar -xzf ~/code.tgz 2>/dev/null; tar -xf ~/data.tar -C data 2>/dev/null; tar -xf ~/resume.tar 2>/dev/null; rm -f ~/data.tar'
   while IFS='|' read -r run args; do
     [ -z "$run" ] && continue
@@ -116,6 +150,13 @@ pull() {
     "lagnav@${IP}:lagnav/runs/" "$RUNS/"
 }
 
+delete_vm() {
+  # shellcheck disable=SC1090
+  source "$STATE"
+  gcloud compute instances delete "$NAME" --project "$PROJECT" --zone "$ZONE" --quiet || true
+  echo "VM: $(vm_state || true)"
+}
+
 vm_state() {
   gcloud compute instances list --project "$PROJECT" --filter="name=$NAME" \
     --format='value(status)' 2>/dev/null
@@ -129,12 +170,17 @@ case "${1:-}" in
     echo "VM: $(vm_state || true)"
     vm 'for f in ~/lagnav/runs/*.log; do echo "$(basename "$f"): $(tail -n 1 "$f" | cut -c1-120)"; done' || true
     ;;
-  delete)
+  delete) delete_vm ;;
+  start)
     # shellcheck disable=SC1090
     source "$STATE"
-    gcloud compute instances delete "$NAME" --project "$PROJECT" --zone "$ZONE" --quiet || true
-    echo "VM: $(vm_state || true)"
+    gcloud compute instances start "$NAME" --project "$PROJECT" --zone "$ZONE" --quiet
+    IP="$(gcloud compute instances describe "$NAME" --project "$PROJECT" --zone "$ZONE" \
+      --format='value(networkInterfaces[0].accessConfigs[0].natIP)')"
+    printf 'ZONE=%s\nIP=%s\n' "$ZONE" "$IP" > "$STATE"
+    ssh-keygen -R "$IP" -f "$KNOWN" > /dev/null 2>&1 || true
+    echo "started at $IP"
     ;;
   vm) shift; vm "$@" ;;
-  *) sed -n '2,17p' "$0"; exit 2 ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
 esac
