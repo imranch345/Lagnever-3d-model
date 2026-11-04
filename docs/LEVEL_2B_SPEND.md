@@ -17,6 +17,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-10-19 | Google Cloud (`lagnever-ai-app-n`), us-central1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | 3.34 (09:55–13:16 UTC) | ~2.85 (estimate, ~$0.85/h) | stage 2 | after two preemptions, per the user's rule: runs A and B finished; VM deleted | **~5.20** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-east1-b | 1× NVIDIA L4, g2-standard-8 spot | 0.62 (06:28–07:05 UTC) | ~0.20 (estimate) | stage 2 | runs C and D (data v3): 27 min of upload, then **preempted** about 10 min into training, before the first save | **~5.40** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 2.69 (07:08–09:49 UTC) | ~2.30 (estimate, ~$0.85/h) | stage 2 | **wasted:** the data upload broke at 07:27 and the launcher did not notice; the VM sat idle until found and deleted. No training ran | **~7.70** |
+| 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 0.82 (10:34–11:23 UTC) | ~0.70 (estimate) | stage 2 | run C alone (user's choice): the upload was still running after 45 min, the new idle watchdog shut the VM down mid-upload, and launch deleted it. No training ran | **~8.40** |
 
 ## Sessions
 
@@ -123,3 +124,12 @@ provider's own billing figures. A cap is a hard stop.
   - on the VM, a watchdog startup script shuts it down after 45 minutes without a
     training process (upload time included). A stopped VM bills only its disk; `start`
     restarts it and records its new IP.
+- **Run C alone, on-demand (user's choice), also lost.** Created at 10:34 UTC in
+  us-central1-a. The upload ran at about 1.2 Mbit/s, so after 45 minutes the data was
+  still not there; the watchdog, which counted only training as activity, shut the VM
+  down mid-upload. The upload's retries then failed, and `launch` deleted the VM at 11:23
+  as designed: the safeguard against idle VMs worked, but the watchdog was wrong to count
+  an upload as idle. Fixed: an upload (`rsync --server`) now counts as activity.
+- **Session: about $3.20 of its $5 cap, still with no training. Project total about $8.40.**
+- **The real bottleneck is the upload.** 430 MB from this connection takes 25–50 minutes
+  and breaks often, and every GPU VM, including each spot replacement, needs it again.

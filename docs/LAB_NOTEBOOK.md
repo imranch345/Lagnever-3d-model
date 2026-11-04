@@ -1484,3 +1484,13 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Runs C and D have not trained yet.** About $2.50 of the session cap remains: enough for
   run C alone on-demand (about 2 h plus upload, roughly $2), not for both. That choice,
   and a session on AC power with the Mac awake, are for the user.
+- **(11:25) Run C, on-demand: lost again, this time to the upload.** The data upload ran
+  at about 1.2 Mbit/s; after 45 minutes the new idle watchdog, which did not count an
+  upload as activity, shut the VM down. `launch` then deleted it (that safeguard worked).
+  Cost about $0.70; session about $3.20 of $5, project about $8.40. Watchdog fixed.
+- **The lesson: do not upload the training data to every GPU VM.** At this connection's
+  speed, every VM spends 25–50 minutes, at GPU prices, waiting for 430 MB, and spot
+  replacements pay it again. Proposed: upload once to a tiny CPU VM, keep the data as a
+  disk snapshot in the project (about $0.03 a month), and create each GPU VM with a data
+  disk made from it, so training starts within minutes. Stage 3's larger data needs this
+  anyway. It adds a persistent resource to the user's project, so it is the user's call.

@@ -16,7 +16,7 @@
 # scopes; SSH uses a dedicated key in instance metadata with project keys blocked. A run
 # resumes from the newest state.pt on the Mac, so losing the VM costs one save interval.
 # If deploying fails, launch deletes the VM. On the VM, a watchdog (startup script) shuts it
-# down after 45 minutes with no training process, so an idle VM bills only its disk.
+# down after 45 minutes with no training or upload, so an idle VM bills only its disk.
 # Uploads use rsync --partial with retries, so a dropped connection resumes the transfer.
 set -euo pipefail
 
@@ -61,12 +61,12 @@ create() {
   watchdog="$(mktemp)"
   cat > "$watchdog" <<'EOF'
 #!/bin/bash
-# Shut down after 45 minutes without a training process (upload included): a stopped VM
-# bills only its disk.
+# Shut down after 45 minutes with neither training nor an upload running: a stopped VM
+# bills only its disk. (rsync --server is the receiving end of an upload.)
 idle=0
 while true; do
   sleep 60
-  if pgrep -f fields.train > /dev/null; then idle=0; else idle=$((idle + 1)); fi
+  if pgrep -f 'fields.train|rsync --server' > /dev/null; then idle=0; else idle=$((idle + 1)); fi
   if [ "$idle" -ge 45 ]; then shutdown -h now; fi
 done
 EOF
