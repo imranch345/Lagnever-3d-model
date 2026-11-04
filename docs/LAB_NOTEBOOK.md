@@ -1516,3 +1516,73 @@ data); code at `8fc2d04` + `f1bdcd4`.
   Truth is the cropped CT in both cases.
 - **Staging done** at 12:17 UTC: snapshot `lagnav-level2b-chest-v3`, 453 MB, 131 subjects;
   the upload took about 10 minutes this time. The stage VM and its disk were deleted.
+
+## 2026-11-04 (22:00) — Run C (data v3) does not fix the IVC; generation 72% against A's 76%
+
+- **Run C trained** on a spot L4 in us-west1-c, from the data snapshot: 40,000 steps in
+  96.7 minutes, no preemption, about $0.60. Final probe accuracy 0.889 (run A 0.888).
+  The watcher deleted the VM at 14:02 UTC. Project total about $9.00.
+- **Calibration** (20 training subjects, data v2 grid), predicted ÷ true before → after:
+  IVC 1.40 → 1.00 and trachea 1.57 → 0.99 (A: 1.33 and 1.55); the rest 1.02–1.14 → 1.00.
+  Offsets are close to A's: about −1.4 to −2.0 for the heart, −2.9 for the IVC.
+- **Held-out volume ratios** (6 subjects, decoded ÷ true, calibrated): chambers, vessels
+  and lobes 1.00–1.02, but **IVC 1.23 and trachea 1.22** (A: 0.97 and 1.07).
+  - Likely in part a measuring mismatch rather than a worse fit: the training crop cuts
+    axial CT slices at the lungs' extent, while `apply_crops` cuts the decoded field along
+    the aligned frame's y. A learned an IVC that stops by itself, so the two cuts agree
+    for A. C's IVC runs on to the box edge, so only the decoded cut stops it, and the two
+    planes differ by the frame's tilt. Not chased further, since C fails the primary
+    question either way.
+- **Generation** (calibrated, 50 seeds, 1 SD, same grid and real-anatomy limits as A):
+  **72% (36 of 50) against A's 76% (38 of 50): no clear change** by the stated rule (under
+  10 points). Novelty median 5.47 mm (A 5.46; a real person 6.21).
+  - **IVC failures: 8 samples for C against 7 for A** (6 in pieces and 2 too small or
+    missing, against 5 in pieces and 3 out of range). Correction: the 07:55 entry said 8
+    for A; that counted failures, and seed 3 had two. A has 7 failing samples.
+  - Other failures move around: aorta 6 samples (A 3), lower lobes 5 + 3 (A 3 + 1),
+    trachea 2 (A 3).
+- **Where C's IVC breaks** (`scratchpad/ivc_pieces.py`, same analysis as for A): exactly
+  where A's did. The stray piece lies at the IVC's lower end, below the main piece,
+  surrounded by "nothing" (the liver's region, not modelled). The tube pinches on its way
+  down to the lung base.
+- **Verdict by the rules stated at 12:30: run C is not adopted.** The crop in the training
+  labels was not what breaks sampled IVCs. A stays the chest model.
+- **Baseline for the fit guard: A re-evaluated** on the 26 held-out subjects, calibrated,
+  with crops, the floor and `--no-smooth` (data v2). Medians, mm (mean in brackets):
+
+  | structure | floor | A calibrated | Level 2a |
+  | --- | --- | --- | --- |
+  | LA | 0.35 | 0.88 (0.89) | 1.25 |
+  | LV | 0.35 | 0.58 (0.64) | 0.82 |
+  | RA | 0.73 | 1.44 (1.53) | 1.43 |
+  | RV | 0.35 | 0.86 (1.13) | 1.20 |
+  | myocardium | 0.39 | 0.67 (0.85) | 0.90 |
+  | aorta | 0.36 | 1.53 (2.45) | – |
+  | pulmonary trunk | 0.35 | 1.41 (2.10) | – |
+  | IVC | 0.36 | 2.94 (4.02) | – |
+  | left upper lobe | 0.35 | 2.41 (3.50) | – |
+  | left lower lobe | 0.36 | 2.50 (3.81) | – |
+  | right upper lobe | 0.36 | 2.10 (2.86) | – |
+  | right middle lobe | 0.36 | 2.22 (3.02) | – |
+  | right lower lobe | 0.37 | 2.28 (3.45) | – |
+  | trachea | 0.38 | 2.59 (3.31) | – |
+
+  With the crops applied to both sides, the IVC (3.86 → 2.94) and the trachea
+  (3.30 → 2.59) read better than in the 2026-10-19 table, which scored them uncropped.
+  C's held-out evaluation is running for the fit record.
+- **Next question: is it the sampler or the decoder?** Training subjects' own codes decode
+  to one-piece IVCs (10 of 10, 09:10 entry); 1 SD Gaussian draws break it in 7 of 50.
+  Stated before running, on calibrated A, judged by the same limits, without novelty:
+  - **midpoints** of 25 random pairs of training codes (seeded);
+  - **Gaussian draws at spread 0.5**, 25 seeds (100–124, unseen so far);
+  - **A's own 50 training codes**, judged as samples are (the generator's control).
+
+  Reading:
+  - if midpoints and 0.5 SD draws pass at 90% or more with the IVC whole, sampled codes
+    break because a 1 SD draw in 104 axes lands far from every training subject. The fix
+    is then the sampler (stay nearer the data, at real-person novelty), free on the Mac;
+  - if midpoints also break the IVC, the decoder fails between people. The fix is then in
+    training, so codes between subjects decode to whole anatomy, and needs a GPU run.
+- **Paused on battery** at 21:59: the charger came off, so C's evaluation (21 of 26
+  subjects done) and A's control were suspended (SIGSTOP), not killed. They resume by
+  themselves on AC power.
