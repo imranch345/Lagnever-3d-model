@@ -1696,3 +1696,45 @@ data); code at `8fc2d04` + `f1bdcd4`.
 - **Not tried:** dropping weak code axes (`--variance`). It was refuted for the lungs on
   run 6, and here the variance is spread out (90% needs 47 of 104 axes), so it would act
   much like a narrower spread.
+
+## 2026-11-05 (20:30) — Runs E: variational codes, approved; rules stated before training
+
+- **The user approved** two runs on one L4 (spot, on-demand fallback, session cap $3),
+  and staging A's training data as a snapshot.
+- **Variational codes** (`fields.train --code-kl β`). Each subject gets a learned spread σ
+  per code dimension. Every training step decodes the code plus Gaussian noise of that
+  spread, and β × Σ ½(σ² − log σ² − 1) (the spread's part of a KL to a unit Gaussian)
+  keeps the clouds from shrinking back to points. The code prior still regularises the
+  code itself, as in A. The checkpoint stores the codes as before, plus `code_log_var`,
+  so calibration, evaluation and generation run unchanged. With β = 0 nothing changes;
+  tests cover resuming bit for bit, with noise drawn from the saved generator.
+- **Choosing β from a measurement, not a guess** (`scratchpad/noise_curvature.py`): A's
+  training loss with Gaussian noise σ on its codes (9 subjects): 0.174 at σ = 0, 0.208 at
+  0.01, 0.321 at 0.02, 0.765 at 0.04, 2.02 at 0.08. That is about 360 σ², so the spread
+  settles where 360 σ²/192 = β/2:
+  - **β = 1e-3 → σ ≈ 0.016,** a fifth of the codes' own spread (0.075 per dimension);
+  - **β = 1e-2 → σ ≈ 0.05,** two thirds of it.
+
+  A network trained with noise grows more tolerant of it, so both should settle somewhat
+  wider. The two runs bracket small and large clouds.
+- **Data: A's own training data, v1 (`level2b-chest`).** Correction to the 12:20 entry:
+  A was trained on v1, not v2. v1 and v2 differ only in the trachea's crop (v2 crops it
+  in the training labels); calibration, generation limits and the held-out evaluation
+  all used v2 for A. E uses v1 for training and v2 for everything after, exactly as A,
+  so only the codes differ.
+- **Runs E** (A's settings plus `--code-kl`): `chest-e-kl3` (β = 1e-3) and
+  `chest-e-kl2` (β = 1e-2), 40,000 steps each.
+- **How E is judged, stated before any result:**
+  - **Same pipeline as A:** calibration on 20 training subjects (v2 grid); generation at
+    1 SD from the Gaussian fitted to the codes, seeds 0–49, real-anatomy limits of v2;
+    held-out evaluation of the 26 held-out subjects on v2, calibrated, with crops, floor
+    and `--no-smooth`.
+  - **Primary, the re-based target at 1 SD:** pass rate at least real people's (69%);
+    per structure at most 5 points above real people (IVC at most 4 of 50, aorta at most
+    2, trachea at most 4); novelty median at least 5.0 mm.
+  - **Fit guard against A:** heart medians within 0.05 mm of A's; IVC and trachea no more
+    than 0.1 mm worse.
+  - **Between the two:** a run must meet both; if both do, the higher novelty wins. If
+    neither meets the target, the IVC count against A's 7 of 50 says whether the clouds
+    helped, and the report says so.
+  - **Noise:** differences under 10 points in pass rate are "no clear change".

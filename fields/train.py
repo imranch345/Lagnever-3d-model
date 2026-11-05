@@ -5,7 +5,12 @@ points, and minimises:
 - class-weighted cross-entropy, because chambers are 1–2% of the points and the lungs about
   40%; weights are the inverse square root of class frequency, normalised to mean 1;
 - plus ``code_prior`` × the mean squared code, which keeps the codes in a ball that a
-  Gaussian can later sample.
+  Gaussian can later sample;
+- with ``code_kl`` above 0 (variational codes), plus ``code_kl`` × the spread's part of a KL
+  divergence to a unit Gaussian, Σ ½(σ² − log σ² − 1). Each step then decodes every
+  subject's code plus noise of its learned spread σ, so the network must decode a cloud
+  around each person. The KL term keeps the clouds from shrinking back to points; the
+  code prior still plays the KL's part for the code itself.
 
 With ``focus_fraction`` above 0, that share of each subject's points is drawn from the box
 around its heart structures (classes named ``focus_prefix``…, several prefixes joined by
@@ -64,6 +69,7 @@ class TrainConfig:
     focus_fraction: float = 0.0
     focus_prefix: str = "heart."
     focus_margin_mm: float = 10.0
+    code_kl: float = 0.0
 
 
 #: The default run; frozen, so sharing one instance is safe.
@@ -168,11 +174,15 @@ def train(
     focus_index, focus_counts = focus_points(points, labels, focus, config.focus_margin_mm)
     # All points live on the device (~0.4 GB for 105 subjects); a step then indexes there.
     points, labels = points.to(run_device), labels.to(run_device)
-    model = AutoDecoder(len(subjects), field_config).to(run_device)
+    model = AutoDecoder(len(subjects), field_config, variational=config.code_kl > 0)
+    model = model.to(run_device)
+    code_parameters = list(model.codes.parameters())
+    if model.log_var is not None:
+        code_parameters += list(model.log_var.parameters())
     optimizer = torch.optim.Adam(
         [
             {"params": model.field.parameters(), "lr": config.lr_field},
-            {"params": model.codes.parameters(), "lr": config.lr_codes},
+            {"params": code_parameters, "lr": config.lr_codes},
         ]
     )
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.steps)
@@ -185,7 +195,9 @@ def train(
     state_path = out_dir / "state.pt"
     if state_path.exists():
         saved = torch.load(state_path, map_location="cpu", weights_only=False)
-        if saved["train_config"] != asdict(config) or saved["subjects"] != list(subjects):
+        # Settings added later (code_kl) take their defaults for states saved before them.
+        settings = {**asdict(DEFAULT_TRAIN), **saved["train_config"]}
+        if settings != asdict(config) or saved["subjects"] != list(subjects):
             raise SystemExit(f"{state_path} is from a different run; move it to start afresh")
         model.load_state_dict(saved["model"])
         optimizer.load_state_dict(saved["optimizer"])
@@ -226,7 +238,7 @@ def train(
         chosen, index = chosen.to(run_device), index.to(run_device)
         batch_points = points[chosen.unsqueeze(1), index]
         batch_labels = labels[chosen.unsqueeze(1), index]
-        logits = model(batch_points, chosen)
+        logits = model(batch_points, chosen, sample=True)
         loss = functional.cross_entropy(
             logits.reshape(-1, field_config.n_classes),
             batch_labels.reshape(-1),
@@ -234,6 +246,10 @@ def train(
         )
         prior = model.codes(chosen).pow(2).sum(-1).mean()
         total = loss + config.code_prior * prior
+        if model.log_var is not None:
+            log_var = model.log_var(chosen)
+            spread_kl = 0.5 * (log_var.exp() - log_var - 1).sum(-1).mean()
+            total = total + config.code_kl * spread_kl
         optimizer.zero_grad(set_to_none=True)
         total.backward()
         optimizer.step()
@@ -255,6 +271,8 @@ def train(
                     ],
                     "seconds": round(time.time() - started, 1),
                 }
+                if model.log_var is not None:
+                    record["code_sd"] = round(float((0.5 * model.log_var.weight).exp().mean()), 4)
             history.append(record)
             print(json.dumps(record), flush=True)
         if step % config.save_every == 0 or step == config.steps:
@@ -269,6 +287,7 @@ def train(
         "classes": manifest["classes"],
         "field": model.field.state_dict(),
         "codes": model.codes.weight.detach().cpu(),
+        "code_log_var": None if model.log_var is None else model.log_var.weight.detach().cpu(),
         "history": history,
         "device": str(run_device),
         "tf32": bool(tf32 and run_device.type == "cuda"),
@@ -313,6 +332,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--lr-field", type=float, default=TrainConfig.lr_field)
     parser.add_argument("--lr-codes", type=float, default=TrainConfig.lr_codes)
     parser.add_argument("--code-prior", type=float, default=TrainConfig.code_prior)
+    parser.add_argument(
+        "--code-kl", type=float, default=TrainConfig.code_kl, help="variational codes: KL weight"
+    )
     parser.add_argument("--save-every", type=int, default=TrainConfig.save_every)
     parser.add_argument("--eval-every", type=int, default=TrainConfig.eval_every)
     parser.add_argument("--device", default=None)
@@ -346,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         focus_fraction=args.focus_fraction,
         focus_margin_mm=args.focus_margin,
         focus_prefix=args.focus_prefix,
+        code_kl=args.code_kl,
     )
     field = FieldConfig(
         hidden=args.hidden,

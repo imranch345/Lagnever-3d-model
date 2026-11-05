@@ -295,6 +295,45 @@ class TestTheField:
         assert torch.cdist(codes, codes).max() > 0, "subjects need distinct codes"
 
 
+class TestVariationalCodes:
+    """Variational codes: each subject's code is decoded with noise of a learned spread."""
+
+    def test_the_spreads_grow_and_the_spheres_are_still_learned(self, tmp_path) -> None:
+        """The KL term widens every subject's cloud from its tiny start; the fit survives."""
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        config = TrainConfig(
+            steps=400,
+            subjects_per_step=4,
+            points_per_subject=2048,
+            eval_every=200,
+            seed=0,
+            lr_codes=1e-2,
+            code_kl=1e-2,
+        )
+        field = FieldConfig(hidden=64, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        final = train(data_dir, tmp_path / "run", config, field, device="cpu")
+        assert final["accuracy"] > 0.9, final
+        checkpoint = torch.load(tmp_path / "run" / "checkpoint.pt", weights_only=False)
+        spread = (0.5 * checkpoint["code_log_var"]).exp()
+        assert spread.shape == checkpoint["codes"].shape
+        assert spread.min() > 1.2 * np.exp(-5.0), "every spread grew from its start"
+        assert final["code_sd"] == pytest.approx(float(spread.mean()), abs=1e-3)
+
+    def test_plain_codes_have_no_spread_and_draw_no_noise(self) -> None:
+        """Without code_kl the model is the plain auto-decoder; sampling changes nothing."""
+        from fields.model import AutoDecoder, FieldConfig
+
+        model = AutoDecoder(3, FieldConfig(hidden=16, layers=2, latent_dim=4, n_classes=3))
+        points, subjects = torch.zeros(3, 5, 3), torch.arange(3)
+        assert model.log_var is None
+        state = torch.get_rng_state()
+        assert torch.equal(model(points, subjects, sample=True), model(points, subjects))
+        assert torch.equal(torch.get_rng_state(), state)
+
+
 class TestFocus:
     """Drawing a share of each step's points around chosen structures."""
 
@@ -330,9 +369,12 @@ class TestFocus:
 class TestResume:
     """A stopped run continues exactly where it stopped (flat battery, reclaimed GPU)."""
 
-    @pytest.mark.parametrize("focus", [0.0, 0.5])
-    def test_stop_and_resume_equals_one_uninterrupted_run(self, tmp_path, focus) -> None:
-        """Same settings, same final network and codes, bit for bit, on the CPU."""
+    @pytest.mark.parametrize(("focus", "code_kl"), [(0.0, 0.0), (0.5, 0.0), (0.0, 1e-2)])
+    def test_stop_and_resume_equals_one_uninterrupted_run(self, tmp_path, focus, code_kl) -> None:
+        """Same settings, same final network and codes, bit for bit, on the CPU.
+
+        With variational codes too: the code noise comes from the saved generator.
+        """
         from fields.model import FieldConfig
         from fields.train import TrainConfig, train
 
@@ -346,6 +388,7 @@ class TestResume:
             seed=3,
             focus_fraction=focus,
             focus_prefix="a",
+            code_kl=code_kl,
         )
         field = FieldConfig(hidden=32, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
         train(data_dir, tmp_path / "whole", config, field, device="cpu")
@@ -358,6 +401,23 @@ class TestResume:
         assert torch.equal(whole["codes"], split["codes"])
         assert all(torch.equal(whole["field"][k], split["field"][k]) for k in whole["field"])
         assert [r["step"] for r in split["history"]] == [60, 120]
+        if code_kl:
+            assert torch.equal(whole["code_log_var"], split["code_log_var"])
+
+    def test_a_state_saved_before_a_new_setting_still_resumes(self, tmp_path) -> None:
+        """A setting added later (code_kl) takes its default for a state that lacks it."""
+        from fields.model import FieldConfig
+        from fields.train import TrainConfig, train
+
+        data_dir = _spheres(tmp_path / "data")
+        field = FieldConfig(hidden=32, layers=4, latent_dim=8, bands=4, scale_mm=60.0)
+        config = TrainConfig(steps=40, subjects_per_step=2, points_per_subject=256, save_every=20)
+        train(data_dir, tmp_path / "run", config, field, device="cpu", stop_after=20)
+        state = tmp_path / "run" / "state.pt"
+        saved = torch.load(state, weights_only=False)
+        del saved["train_config"]["code_kl"]
+        torch.save(saved, state)
+        assert "accuracy" in train(data_dir, tmp_path / "run", config, field, device="cpu")
 
     def test_a_state_from_other_settings_is_refused(self, tmp_path) -> None:
         """Resuming with different settings would silently mix two runs; it stops instead."""

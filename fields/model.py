@@ -9,7 +9,9 @@ same place: non-overlap is a property of the representation, not a check passed 
 * The code is concatenated to every layer's input (DeepSDF-style), with one skip connection
   halfway.
 * ``AutoDecoder`` holds one learned code per training subject. A new subject is fitted by
-  optimising a fresh code with the network frozen.
+  optimising a fresh code with the network frozen. With ``variational``, each subject also
+  has a learned spread: training decodes its code plus Gaussian noise of that spread, so the
+  network learns a cloud of codes around each person rather than one point.
 * ``PartField`` (when ``part_of`` is set) gives each part of the thorax its own code and
   trunk: one for the heart, one for the lungs. Each trunk scores "background" and its own
   structures; the scores combine as a product of experts over one softmax:
@@ -194,17 +196,34 @@ def make_field(config: FieldConfig = DEFAULT_FIELD) -> Field:
 
 
 class AutoDecoder(nn.Module):
-    """The field plus one learned code per training subject."""
+    """The field plus one learned code per training subject, and optionally its spread."""
 
-    def __init__(self, n_subjects: int, config: FieldConfig = DEFAULT_FIELD) -> None:
+    def __init__(
+        self, n_subjects: int, config: FieldConfig = DEFAULT_FIELD, *, variational: bool = False
+    ) -> None:
         super().__init__()
         self.field = make_field(config)
         self.codes = nn.Embedding(n_subjects, config.code_dim)
         nn.init.normal_(self.codes.weight, mean=0.0, std=0.01)
+        #: Per subject and dimension, the log variance of the code's noise (``variational``).
+        self.log_var: nn.Embedding | None = None
+        if variational:
+            self.log_var = nn.Embedding(n_subjects, config.code_dim)
+            nn.init.constant_(self.log_var.weight, -10.0)
 
-    def forward(self, points_mm: torch.Tensor, subjects: torch.Tensor) -> torch.Tensor:
-        """Logits for the subjects' own codes."""
-        logits: torch.Tensor = self.field(points_mm, self.codes(subjects))
+    def forward(
+        self, points_mm: torch.Tensor, subjects: torch.Tensor, *, sample: bool = False
+    ) -> torch.Tensor:
+        """Logits for the subjects' own codes; with ``sample``, codes drawn around them.
+
+        The noise is drawn on the CPU from torch's global generator, so a resumed run draws
+        the same noise as an uninterrupted one on any device.
+        """
+        codes = self.codes(subjects)
+        if sample and self.log_var is not None:
+            noise = torch.randn(codes.shape).to(codes.device)
+            codes = codes + (0.5 * self.log_var(subjects)).exp() * noise
+        logits: torch.Tensor = self.field(points_mm, codes)
         return logits
 
 
