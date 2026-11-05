@@ -1673,3 +1673,26 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - it is then confirmed on 50 fresh draws (seeds 200–249) with the product's own
     `fields.generate`, against the re-based target (overall and per structure).
   - If none qualifies, the trade-off is reported and the next lever is training, on a GPU.
+- **(19:10) Sampler candidates, selection set** (seeds 100–124, 25 draws each):
+
+  | sampler | pass | IVC fails | aorta fails | novelty median |
+  | --- | --- | --- | --- | --- |
+  | Gaussian 1 SD (seeds 0–49, for reference) | 76% (38/50) | 7/50 | 3/50 | 5.46 mm |
+  | Gaussian 0.7 SD | 92% (23/25) | 1 | 1 | 4.83 mm |
+  | Gaussian 0.5 SD | 96% (24/25) | 0 | 0 | 4.44 mm |
+  | mixture of 3 | 84% (21/25) | 3 | 0 | 4.37 mm |
+  | mixture of 2 | 84% (21/25) | 4 | 0 | 2.90 mm |
+
+  - **None qualifies.** Every candidate is below the 5.0 mm novelty floor, and the
+    mixtures also fail the IVC check (small stray pieces of 1.5–3.9%, against a real
+    limit of 1.1%).
+  - **The trade-off is smooth:** narrowing the Gaussian buys validity with novelty, about
+    16 points of pass rate for 0.6 mm. 0.7 SD comes closest (92% at 4.83 mm, 78% of a
+    real person's novelty), but re-drawing it until it crosses 5.0 would be fishing.
+  - **Mixtures are worse than the Gaussian at equal novelty:** mixing within a few people
+    does not keep the IVC whole, so the problem is not negative weights alone.
+  - **By the stated rule, the next lever is training.** The decoder must learn to decode
+    codes the way the sampler draws them, not only 105 points.
+- **Not tried:** dropping weak code axes (`--variance`). It was refuted for the lungs on
+  run 6, and here the variance is spread out (90% needs 47 of 104 axes), so it would act
+  much like a narrower spread.
