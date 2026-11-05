@@ -1738,3 +1738,24 @@ data); code at `8fc2d04` + `f1bdcd4`.
     neither meets the target, the IVC count against A's 7 of 50 says whether the clouds
     helped, and the report says so.
   - **Noise:** differences under 10 points in pass rate are "no clear change".
+- **(21:05) Session so far.**
+  - **Staging** data v1 took 55 minutes (14:04–14:59 UTC): the connection dropped for a
+    while (DNS failed), and rsync resumed. Snapshot `lagnav-level2b-chest`, 131 subjects.
+  - **Spot VM preempted 47 s after creation** (us-central1-c, 15:01:50), while its code was
+    uploading. Per the rule, the next VM was on-demand.
+  - **On-demand VM** in asia-south1-b (Mumbai) at 15:19:39. The US zones refused, probably
+    because the preempted VM still held the project's single GPU quota
+    (`GPUS_ALL_REGIONS` 1 of 1). Mumbai's price, from the Cloud Billing catalog:
+    8 × $0.0260 + 32 GiB × $0.0030 + L4 $0.583, **about $0.89 an hour**.
+  - **Both runs started at 15:22, but together they would not fit the cap.** Two runs on
+    one L4 do 2,000 steps in 613 s each, so 40,000 steps take about 3.4 hours (A and B
+    took the same): about $3.15 in all, over the $3 cap.
+  - **So run `chest-e-kl2` was stopped at step 2,000** (its state is kept, resumable) and
+    `chest-e-kl3` trains alone: about 90 more minutes, about $1.70 for the session. If
+    kl3 fails, kl2 can run in a later session; if kl3 works, kl2 may not be needed.
+  - **Early sign:** the spreads grew much faster than the measurement predicted. Mean σ at
+    step 2,000 was 0.081 (β 1e-3) and 0.094 (β 1e-2), already above the codes' own spread.
+    The prediction used A's fully trained decoder. Early in training the network is not
+    yet sharp, so noise costs little and σ grows; whether it shrinks back as the network
+    sharpens is the run's first question. The history records `code_sd` every 1,000
+    steps.
