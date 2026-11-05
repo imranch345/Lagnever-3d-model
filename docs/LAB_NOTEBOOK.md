@@ -1759,3 +1759,15 @@ data); code at `8fc2d04` + `f1bdcd4`.
     yet sharp, so noise costs little and σ grows; whether it shrinks back as the network
     sharpens is the run's first question. The history records `code_sd` every 1,000
     steps.
+- **(21:40) kl3 at step 14,000: most code dimensions switched off.** Mean σ reached 0.80,
+  but that average hides two groups (from the pulled `state.pt`):
+  - **29 of 192 dimensions are active** (8, 10 and 11 in the vessel, heart and lung
+    parts), with σ about 0.04–0.06 against their codes' spread of 0.32–0.36: clouds about
+    a seventh of the spread;
+  - **the other 163 have collapsed** to the prior (σ near 1, codes near 0), and the
+    network ignores them, the usual behaviour of a variational code with a KL term.
+  - **What it may mean for sampling:** each part now lives in about 10 dimensions, where
+    105 people cover the space far more densely than in 64, so a 1 SD draw should land
+    near real people. **The price so far is fit:** probe accuracy 0.754 against A's 0.790
+    at the same step (loss 0.350 against 0.294). The cosine schedule's last half decides
+    how much of that gap closes; the fit guard judges it.
