@@ -1644,3 +1644,32 @@ data); code at `8fc2d04` + `f1bdcd4`.
   - **Where A stands:** overall met (76%). Per structure, the IVC (14% against at most 9%)
     and the aorta (6% against at most 5%) are not yet; every other structure is.
   - ROADMAP, PLAN and RESULTS now state this target, keeping the first 90% on record.
+
+## 2026-11-05 (07:15) — The sampler, not the decoder, breaks the IVC
+
+- **Codes between real people decode whole** (calibrated A, same limits, no novelty):
+  - **midpoints of 25 random pairs** of training codes: **24 of 25 pass**; the one failure
+    is an IVC with 5.7% in a stray piece;
+  - **Gaussian draws at 0.5 SD** (seeds 100–124): **24 of 25 pass**, no IVC failure (one
+    left lower lobe not closed);
+  - against **1 SD draws: 38 of 50, the IVC failing in 7.**
+- **Reading, as stated before the run:** the decoder handles codes between people. 1 SD
+  draws break because, in 104 axes, a Gaussian draw lands far from every training
+  subject, mixing people with negative as well as positive weights. **The fix is the
+  sampler**, and it can be tested free on the Mac.
+- **The catch is novelty.** A sampler that stays near the data can make near-copies of
+  training people. Real held-out people sit 6.21 mm (median) from their nearest training
+  subject; 1 SD draws sit 5.46 mm away.
+- **Candidates, stated before measuring** (calibrated A, 25 draws each on a selection set,
+  seeds 100–124, judged as samples are, with novelty; `scratchpad/samplers.py`):
+  - Gaussian at 0.5 and at 0.7 SD;
+  - **mixtures:** random Dirichlet(1) weights over 2, or over 3, random training codes. All
+    weights are positive, so a draw stays inside the people it mixes.
+- **Selection rule:**
+  - a candidate qualifies if, on the selection set, it passes at least real people's
+    69%, fails the IVC in at most 2 of 25 and the aorta in at most 1 of 25, and keeps
+    its novelty median at or above 5.0 mm (80% of a real person's);
+  - among those that qualify, the one with the highest novelty is chosen;
+  - it is then confirmed on 50 fresh draws (seeds 200–249) with the product's own
+    `fields.generate`, against the re-based target (overall and per structure).
+  - If none qualifies, the trade-off is reported and the next lever is training, on a GPU.
