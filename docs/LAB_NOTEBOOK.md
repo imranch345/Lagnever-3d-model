@@ -1799,3 +1799,8 @@ data); code at `8fc2d04` + `f1bdcd4`.
     state after an error. Watchers must retry until it succeeds before they say "deleted".
 - **What would recover kl3:** resume from step 18,000 (22,000 steps alone, about an hour
   on an L4). That is new spend, so it is the user's decision.
+- **(23:32) Resume approved, then stopped.** The user approved resuming kl3 (spot, cap $1).
+  A spot VM came up in us-central1-c at 17:57 UTC and kl3 resumed at step 18,001; at
+  18:02 the user asked to stop everything for the night. The watcher was stopped, the
+  VM deleted (confirmed: no VM or disk in the project). Cost about $0.03; project about
+  $11.29. kl3's state is still at step 18,000 and kl2's at 2,000.

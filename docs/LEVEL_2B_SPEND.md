@@ -23,6 +23,7 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | none (e2-small CPU VM) | 0.92 (14:04–14:59 UTC) | ~0.02, plus ~$0.03 a month for the snapshot | stage 2 | staging data v1 as the snapshot `lagnav-level2b-chest` for runs E (slow, unstable connection) | **~9.02** |
 | 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 0.02 (15:00:34–15:01:50 UTC) | ~0.01 | stage 2 | runs E: **preempted 47 s after creation**, during the code upload | **~9.03** |
 | 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), asia-south1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | 2.48 running (15:19:39–17:48:10 UTC), then stopped until 21:19 | ~2.23 (~$0.89/h from the billing catalog, plus disks while stopped) | stage 2 | runs E: kl2 paused at step 2,000 to fit the cap; kl3 trained alone, but **its final checkpoint was lost**: the Mac slept after the step-18,000 pull, the VM's watchdog stopped it at 17:48 and its 6 h limit deleted it with its disks at 21:19 | **~11.26** |
+| 2026-11-06 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 0.08 (17:57:59–18:02 UTC) | ~0.03 | stage 2 | resume kl3 from step 18,000 (user's approval, cap $1); **stopped at the user's request** a minute after training resumed; VM deleted and confirmed | **~11.29** |
 
 ## Sessions
 
