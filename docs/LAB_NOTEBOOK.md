@@ -1771,3 +1771,31 @@ data); code at `8fc2d04` + `f1bdcd4`.
     near real people. **The price so far is fit:** probe accuracy 0.754 against A's 0.790
     at the same step (loss 0.350 against 0.294). The cosine schedule's last half decides
     how much of that gap closes; the fit guard judges it.
+
+## 2026-11-06 (23:30) — kl3's final checkpoint lost with its VM; the launcher no longer deletes
+
+- **What happened** (from the project's operation log):
+  - kl3 trained alone from step 2,000; the watcher pulled step 18,000 at 16:13 UTC;
+  - the Mac then slept; when it woke (18:17) the network and gcloud's token refresh were
+    failing, so nothing more was pulled;
+  - training ended around 17:03. The VM's watchdog stopped it at 17:48, 45 idle minutes
+    later, as designed;
+  - at 21:19, six hours after creation, the VM's run-duration limit **deleted the stopped
+    VM with its disks, and kl3's final checkpoint with them;**
+  - the watcher's 04:22 hard stop then printed "VM deleted", though its own delete had
+    failed. That message was wrong.
+- **Cost:** 2.48 hours on-demand in Mumbai plus disks while stopped, about $2.23. Session
+  about $2.26 of $3, project about $11.26. kl3's state at step 18,000 and kl2's at 2,000
+  are on the Mac.
+- **Lesson: a result must never live only on a machine that deletes itself.** The
+  safeguard against idle spend (self-deletion) destroyed unpulled results when the Mac
+  that pulls them was asleep.
+- **Fixes in `tools/gpu_session.sh`:**
+  - the 6-hour limit, and a spot reclaim, now **stop** the VM instead of deleting it. A
+    stopped VM keeps its disks (about $0.37 a day for 110 GB) and its runs' files, and
+    `start` then `pull` recovers them. Idle GPU time is still capped by the watchdog and
+    the 6-hour limit;
+  - `delete` reports a failed delete and exits non-zero, instead of printing the VM's
+    state after an error. Watchers must retry until it succeeds before they say "deleted".
+- **What would recover kl3:** resume from step 18,000 (22,000 steps alone, about an hour
+  on an L4). That is new spend, so it is the user's decision.

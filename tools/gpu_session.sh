@@ -13,9 +13,12 @@
 # DATA_DIR is a fields.data output folder (manifest.json and points/).
 # PROVISIONING=SPOT (default) or STANDARD (on-demand, never reclaimed).
 #
-# Safeguards: the VM deletes itself after 6 hours; it has no service account and no API
-# scopes; SSH uses a dedicated key in instance metadata with project keys blocked. A run
-# resumes from the newest state.pt on the Mac, so losing the VM costs one save interval.
+# Safeguards: the VM stops itself after 6 hours, and a spot VM stops when reclaimed. A stopped
+# VM bills only its disks (about $0.37 a day) and keeps the runs' files, so results that were
+# not yet pulled survive a sleeping Mac; `start` brings it back and `delete` removes it. (Until
+# 2026-11-06 the VM deleted itself, and a finished run's checkpoint was lost with it.) It has
+# no service account and no API scopes; SSH uses a dedicated key in instance metadata with
+# project keys blocked. A run resumes from the newest state.pt on the Mac.
 # If deploying fails, launch deletes the VM. On the VM, a watchdog (startup script) shuts it
 # down after 45 minutes with no training or upload, so an idle VM bills only its disk.
 # Uploads use rsync --partial with retries, so a dropped connection resumes the transfer.
@@ -94,7 +97,7 @@ EOF
   for zone in $ZONES; do
     if gcloud compute instances create "$NAME" --project "$PROJECT" --zone "$zone" \
         --machine-type g2-standard-8 --provisioning-model "$provisioning" \
-        --instance-termination-action DELETE --max-run-duration 6h \
+        --instance-termination-action STOP --max-run-duration 6h \
         --maintenance-policy TERMINATE \
         --image-family pytorch-2-9-cu129-ubuntu-2404-nvidia-580 \
         --image-project deeplearning-platform-release \
@@ -182,8 +185,12 @@ pull() {
 delete_vm() {
   # shellcheck disable=SC1090
   source "$STATE"
-  gcloud compute instances delete "$NAME" --project "$PROJECT" --zone "$ZONE" --quiet || true
-  echo "VM: $(vm_state || true)"
+  if gcloud compute instances delete "$NAME" --project "$PROJECT" --zone "$ZONE" --quiet; then
+    echo "VM deleted"
+  else
+    echo "DELETE FAILED: the VM may still exist ($(vm_state || echo unknown)); run delete again" >&2
+    return 1
+  fi
 }
 
 stage() {  # stage DATA_DIR: upload once to a small CPU VM, keep it as a snapshot, clean up

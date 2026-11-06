@@ -20,6 +20,9 @@ provider's own billing figures. A cap is a hard stop.
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | 1× NVIDIA L4, g2-standard-8 **on-demand** | 0.82 (10:34–11:23 UTC) | ~0.70 (estimate) | stage 2 | run C alone (user's choice): the upload was still running after 45 min, the new idle watchdog shut the VM down mid-upload, and launch deleted it. No training ran | **~8.40** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | none (e2-small CPU VM) | 0.23 (12:03–12:17 UTC) | ~0.01, plus ~$0.03 a month for the snapshot | stage 2 | staging: data v3 uploaded once and kept as the snapshot `lagnav-level2b-chest-v3` | **~8.41** |
 | 2026-11-04 | Google Cloud (`lagnever-ai-app-n`), us-west1-c | 1× NVIDIA L4, g2-standard-8 spot | 1.68 (12:21:56–14:02 UTC) | ~0.60 (estimate, ~$0.35/h) | stage 2 | **run C trained:** data from the snapshot, training 12:22:43–13:59:25 (40,000 steps, 96.7 min), no preemption; VM deleted by the watcher | **~9.00** |
+| 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), us-central1-a | none (e2-small CPU VM) | 0.92 (14:04–14:59 UTC) | ~0.02, plus ~$0.03 a month for the snapshot | stage 2 | staging data v1 as the snapshot `lagnav-level2b-chest` for runs E (slow, unstable connection) | **~9.02** |
+| 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), us-central1-c | 1× NVIDIA L4, g2-standard-8 spot | 0.02 (15:00:34–15:01:50 UTC) | ~0.01 | stage 2 | runs E: **preempted 47 s after creation**, during the code upload | **~9.03** |
+| 2026-11-05 | Google Cloud (`lagnever-ai-app-n`), asia-south1-b | 1× NVIDIA L4, g2-standard-8 **on-demand** | 2.48 running (15:19:39–17:48:10 UTC), then stopped until 21:19 | ~2.23 (~$0.89/h from the billing catalog, plus disks while stopped) | stage 2 | runs E: kl2 paused at step 2,000 to fit the cap; kl3 trained alone, but **its final checkpoint was lost**: the Mac slept after the step-18,000 pull, the VM's watchdog stopped it at 17:48 and its 6 h limit deleted it with its disks at 21:19 | **~11.26** |
 
 ## Sessions
 
@@ -147,3 +150,25 @@ provider's own billing figures. A cap is a hard stop.
   preemption). The watcher pulled the checkpoint and deleted the VM at 14:02; no VM or
   disk was left in the project.
 - **Session: about $3.80 of its $5 cap. Project total about $9.00 of $700.**
+
+### 2026-11-05 · stage 2 · runs E (variational codes)
+
+- **Approved by the user:** two runs on one L4, spot with on-demand fallback, session cap $3,
+  and staging data v1 as a snapshot.
+- **Staging** took 55 minutes on an unstable connection (DNS failed for a while; rsync
+  resumed). Snapshot `lagnav-level2b-chest`, 131 subjects.
+- **Spot** in us-central1-c was preempted 47 s after creation.
+- **On-demand** came up in asia-south1-b (Mumbai) at 15:19:39 UTC, about $0.89 an hour by
+  the Cloud Billing catalog. The US zones refused, probably because the preempted VM still
+  held the project's single GPU quota.
+- **Two runs together would have taken about 3.4 hours (about $3.15),** over the cap, so
+  `chest-e-kl2` was stopped at step 2,000 (state kept) and `chest-e-kl3` trained alone.
+- **The final checkpoint of kl3 was lost.** The last pull was at 16:13 (step 18,000).
+  The Mac then slept, and when it woke the network and gcloud's token refresh failed.
+  The VM's watchdog stopped it at 17:48, 45 minutes after training ended; its 6-hour limit
+  then deleted it, with its disks, at 21:19. The watcher's hard stop at 04:22 reported
+  "VM deleted" though its delete command had failed (a bug in the watcher's message).
+- **Session: about $2.26 of its $3 cap, with no finished run. Project total about
+  $11.26 of $700.** Both runs' states are on the Mac (kl3 at step 18,000, kl2 at 2,000),
+  so either can resume.
+- **Fixed after this:** see `LAB_NOTEBOOK.md` 2026-11-06.
